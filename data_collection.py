@@ -1,6 +1,6 @@
 import config as cfg
 from os import listdir
-from os.path import join
+from os.path import join, getsize
 import gzip
 import json
 import requests
@@ -10,6 +10,7 @@ import math
 import logging
 import pymongo
 import re
+from logging.handlers import RotatingFileHandler
 
 # list gzip files which was downloaded from https://www.gharchive.org/
 gz_json_files = listdir(cfg.data_path)
@@ -22,7 +23,12 @@ db = client.github_project
 users = db.users
 repositories = db.repositories
 
-logging.basicConfig(filename='data_collection.log', encoding='utf-8', level=logging.INFO)
+log_name = 'data_collection.log'
+logging.basicConfig(filename=log_name, level=logging.INFO)
+logger = logging.getLogger()
+logger.addHandler(logging.StreamHandler())
+rotating_handler = RotatingFileHandler(log_name, maxBytes=5*1024*1024, backupCount=1)
+logger.addHandler(rotating_handler)
 
 def get_json_from_url(url: str):
     req = requests.get(url, headers=headers)
@@ -56,7 +62,7 @@ def check_rate_limit(func):
         if remaining == 0:
             time_diff = reset - datetime.datetime.now().timestamp()
             time_diff = math.ceil(time_diff)
-            logging.warn('Limit reached, sleep for %s seconds!' % time_diff)
+            logging.warning('Limit reached, sleep for %s seconds!' % time_diff)
             sleep(time_diff)
         
         return func(*args, **kwargs)
@@ -337,12 +343,16 @@ def add_repo_owner(user_url):
 
 def process_gzip_files():
     for gz_json_file in gz_json_files:
-        logging.debug('Processing: %s' % gz_json_file)
+        logging.warning('Processing: %s' % gz_json_file)
 
         file_path = join(cfg.data_path, gz_json_file)
 
         file_content = None
         json_array = None
+
+        if getsize(file_path) > cfg.max_file_size:
+            logging.warning('The file is too large, skip it.')
+            continue
 
         with gzip.open(file_path, 'r') as gz_file:
             file_content = gz_file.read().decode('utf-8')
@@ -350,9 +360,11 @@ def process_gzip_files():
 
         json_array_length = len(json_array)
 
+        i = 0
         # each element of the json_array is an event object which contains the interaction between an user and a project.
         for j in json_array:
-            logging.debug('Total number of records: %s, currently processing: %s, progress: %s' % (json_array_length, j))
+            logging.warning('Total number of records: %s, currently processing: %s' % (json_array_length, i))
+            i += 1
 
             json_data = json.loads(j)
             event_type = json_data['type']
