@@ -31,11 +31,11 @@ rotating_handler = RotatingFileHandler(log_name, maxBytes=5*1024*1024, backupCou
 logger.addHandler(rotating_handler)
 
 def get_json_from_url(url: str):
-    req = requests.get(url, headers=headers)
     try:
+        req = requests.get(url, headers=headers)
         req_json = req.json()
     except:
-        logging.error('An error encountered when parsing json content from this url: %s' % url)
+        logging.error('An error occured when requesting content from this url: %s' % url)
         return -1
     if 'message' in req_json:
         logging.error('This url returns an error: %s' % req_json['message'])
