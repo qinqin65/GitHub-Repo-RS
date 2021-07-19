@@ -8,23 +8,19 @@ from time import sleep
 import datetime
 import math
 import logging
-import pymongo
 import re
 from logging.handlers import RotatingFileHandler
+from db_manager import users, repositories, close
 
 # list gzip files which was downloaded from https://www.gharchive.org/
-gz_json_files = listdir(cfg.data_path)
+gz_json_files = [
+    '2021-05-01-12.json.gz'
+]
 # GitHub user token which will be used to authorise the API requests hereinafter 
 headers = {'Authorization': 'token %s' % cfg.oauth_token}
 
-# No Sql database which will be used to store the users and projects data
-client = pymongo.MongoClient(cfg.db_conn_str, serverSelectionTimeoutMS=5000)
-db = client.github_project
-users = db.users
-repositories = db.repositories
-
 log_name = 'data_collection.log'
-logging.basicConfig(filename=log_name, level=logging.INFO)
+logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', filename=log_name, level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger()
 logger.addHandler(logging.StreamHandler())
 rotating_handler = RotatingFileHandler(log_name, maxBytes=5*1024*1024, backupCount=1)
@@ -38,7 +34,7 @@ def get_json_from_url(url: str):
         logging.error('An error occured when requesting content from this url: %s' % url)
         return -1
     if 'message' in req_json:
-        logging.error('This url returns an error: %s' % req_json['message'])
+        logging.error('This url: %s, returns an error: %s' % (url, req_json['message']))
         return -1
     return req_json
 
@@ -69,7 +65,7 @@ def check_rate_limit(func):
     return wrapper
 
 @check_rate_limit
-def get_user(user_url: str, add_repos=False):
+def get_user(user_url: str):
     user_detail = get_json_from_url(user_url)
     if user_detail == -1:
         logging.error('Got -1 when requesting from %s' % user_url)
@@ -106,15 +102,25 @@ def get_user(user_url: str, add_repos=False):
     user_dict['following'] = user_detail['following']
     user_dict['created_at'] = datetime.datetime.strptime(user_detail['created_at'], '%Y-%m-%dT%H:%M:%SZ')
     user_dict['updated_at'] = datetime.datetime.strptime(user_detail['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
-    user_dict['followings'] = get_following_list(user_dict['following_url'])
-    user_dict['starred_repos'] = get_starred_repos(user_dict['starred_url'], add_repos)
-    user_dict['subscriptions'] = get_subscriptions(user_dict['subscriptions_url'], add_repos)
-    user_dict['repos'] = get_user_repos(user_dict['repos_url'], add_repos)
+    user_dict['followers_list'] = get_followers_list(user_dict['followers_url'])
+
+    starred_repos_id_list, starred_repos_url_list = get_starred_repos(user_dict['starred_url'])
+    subscriptions_id_list, subscriptions_url_list = get_subscriptions(user_dict['subscriptions_url'])
+    own_repos_id_list, fork_repos_id_list, own_repos_url_list, fork_repos_url_list = get_user_repos(user_dict['repos_url'])
+
+    user_dict['starred_repos_id'] = starred_repos_id_list
+    user_dict['starred_repos_url'] = starred_repos_url_list
+    user_dict['subscriptions_id'] = subscriptions_id_list
+    user_dict['subscriptions_url'] = subscriptions_url_list
+    user_dict['own_repos_id'] = own_repos_id_list
+    user_dict['own_repos_url'] = own_repos_url_list
+    user_dict['fork_repos_id'] = fork_repos_id_list
+    user_dict['fork_repos_url'] = fork_repos_url_list
 
     return user_dict
 
 @check_rate_limit
-def get_repo(repo_url: str, add_users=False):
+def get_repo(repo_url: str):
     repo_detail = get_json_from_url(repo_url)
     if repo_detail == -1:
         logging.error('Got -1 when requesting from %s' % repo_url)
@@ -201,12 +207,6 @@ def get_repo(repo_url: str, add_users=False):
     repo_dict['subscribers_count'] = repo_detail['subscribers_count']
     repo_dict['languages_detail'] = get_repo_languages_detail(repo_detail['languages_url'])
 
-    if add_users:
-        add_star_gazers(repo_detail['stargazers_url'])
-        add_contributors(repo_detail['contributors_url'])
-        add_subscribers(repo_detail['subscribers_url'])
-        add_repo_owner(repo_detail['owner']['url'])
-
     return repo_dict
 
 @check_rate_limit
@@ -223,62 +223,77 @@ def get_following_list(following_url: str):
     return following_list
 
 @check_rate_limit
-def get_subscriptions(subscriptions_url: str, add_repos=False):
-    subscription_list = list()
-    subscriptions = get_json_from_url(subscriptions_url)
-    if subscriptions == -1:
+def get_followers_list(followers_url):
+    followers_list = list()
+    req_url = followers_url
+    followers = get_json_from_url(req_url)
+    if followers == -1:
         return [-1]
-    for subscription in subscriptions:
-        id = subscription['id']
-        subscription_list.append(id)
-        if add_repos:
-            if repositories.find_one({'_id': id}) is None:
-                # add the repo to the database
-                repo_url = subscription['url']
-                repo_details = get_repo(repo_url)
-                if repo_details != -1:
-                    repositories.insert_one(repo_details)
-    
-    return subscription_list
+    for follower in followers:
+        id = follower['id']
+        followers_list.append(id)
+            
+    return followers_list
 
 @check_rate_limit
-def get_starred_repos(starred_url: str, add_repos=False):
-    starred_repos_list = list()
+def get_subscriptions(subscriptions_url: str):
+    subscriptions_id_list = list()
+    subscriptions_url_list = list()
+    subscriptions = get_json_from_url(subscriptions_url)
+    if subscriptions == -1:
+        return [-1], [-1]
+    for subscription in subscriptions:
+        id = subscription['id']
+        url = subscription['url']
+        subscriptions_id_list.append(id)
+        subscriptions_url_list.append(url)
+
+    return subscriptions_id_list, subscriptions_url_list
+
+@check_rate_limit
+def get_starred_repos(starred_url: str):
+    starred_repos_id_list = list()
+    starred_repos_url_list = list()
     req_url = starred_url.format(**{'/owner': '', '/repo': ''})
     starred_repos = get_json_from_url(req_url)
     if starred_repos == -1:
-        return [-1]
+        return [-1], [-1]
     for repo in starred_repos:
         id = repo['id']
-        starred_repos_list.append(id)
-        if add_repos:
-            if repositories.find_one({'_id': id}) is None:
-                # add the repo to the database
-                repo_url = repo['url']
-                repo_details = get_repo(repo_url)
-                if repo_details != -1:
-                    repositories.insert_one(repo_details)
+        url = repo['url']
+        starred_repos_id_list.append(id)
+        starred_repos_url_list.append(url)
     
-    return starred_repos_list
+    return starred_repos_id_list, starred_repos_url_list
+
+def add_repos(id_list, url_list):
+    for id, repo_url in zip(id_list, url_list):
+        if repositories.find_one({'_id': id}) is None:
+            repo_details = get_repo(repo_url)
+            if repo_details != -1:
+                repositories.insert_one(repo_details)
 
 @check_rate_limit
-def get_user_repos(repos_url: str, add_repos=False):
-    repo_list = list()
+def get_user_repos(repos_url: str):
+    own_repos_id_list = list()
+    fork_repos_id_list = list()
+    own_repos_url_list = list()
+    fork_repos_url_list = list()
     repos = get_json_from_url(repos_url)
     if repos == -1:
-        return [-1]
+        return [-1], [-1], [-1], [-1]
     for repo in repos:
         id = repo['id']
-        repo_list.append(id)
-        if add_repos:
-            if repositories.find_one({'_id': id}) is None:
-                # add the repo to the database
-                repo_url = repo['url']
-                repo_details = get_repo(repo_url)
-                if repo_details != -1:
-                    repositories.insert_one(repo_details)
+        fork = repo['fork']
+        url = repo['url']
+        if fork:
+            fork_repos_id_list.append(id)
+            fork_repos_url_list.append(url)
+        else:
+            own_repos_id_list.append(id)
+            own_repos_url_list.append(url)
     
-    return repo_list
+    return own_repos_id_list, fork_repos_id_list, own_repos_url_list, fork_repos_url_list
 
 @check_rate_limit
 def get_repo_languages_detail(languages_url: str):
@@ -367,38 +382,57 @@ def process_gzip_files():
             i += 1
 
             json_data = json.loads(j)
-            event_type = json_data['type']
-            created_at = datetime.datetime.strptime(json_data['created_at'], '%Y-%m-%dT%H:%M:%SZ')
             
             # add repository
             repo = json_data['repo']
             repo_url = repo['url']
-            repo_dict = get_repo(repo_url, True)
+            repo_dict = get_repo(repo_url)
             if repo_dict != -1:
-                repo_id = repo_dict['_id']
-                exist_repo = repositories.find_one({'_id': repo_id})
-                if exist_repo is None:
-                    repositories.insert_one(repo_dict)
-                    logging.info('A repository was added!')
+                stargazers_count = repo_dict['stargazers_count']
+                watchers_count = repo_dict['watchers_count']
+                # add it to the databse only when the threshold is met
+                if stargazers_count >= cfg.threshold or watchers_count >= cfg.threshold:
+                    repo_id = repo_dict['_id']
+                    exist_repo = repositories.find_one({'_id': repo_id})
+                    if exist_repo is None:
+                        repositories.insert_one(repo_dict)
+                        logging.info('A repository was added!')
+                    # add users
+                    if stargazers_count >= cfg.threshold:
+                        add_star_gazers(repo_dict['stargazers_url'])
+                    if watchers_count >= cfg.threshold:
+                        add_subscribers(repo_dict['subscribers_url'])
+                    # add_contributors(repo_dict['contributors_url'])
+                    add_repo_owner(repo_dict['owner']['url'])
 
             # add user
             user = json_data['actor']
             user_url = user['url']
-            user_dict = get_user(user_url, True)
+            user_dict = get_user(user_url)
             if user_dict != -1:
-                user_id = user_dict['_id']
-                exist_user = users.find_one({'_id': user_id})
-                if exist_user is None:
-                    user_dict['interactions'] = [{'type': event_type, 'repo': repo_id, 'created_at': created_at}]
-                    users.insert_one(user_dict)
-                    logging.info('An user was added!')
-                else:
-                    interactions = exist_user['interactions'] if 'interactions' in exist_user else []
-                    interactions.append({'type': event_type, 'repo': repo_id, 'created_at': created_at})
-                    lookup_filter = {'_id': user_id}
-                    new_values = {'$set': {'interactions': interactions}}
-                    users.update_one(lookup_filter, new_values)
-                    logging.info('An user was updated!')
+                starred_repos_id_list = user_dict['starred_repos_id']
+                starred_repos_url_list = user_dict['starred_repos_url']
+                subscriptions_id_list = user_dict['subscriptions_id']
+                subscriptions_url_list = user_dict['subscriptions_url']
+                fork_repos_id_list = user_dict['fork_repos_id']
+                fork_repos_url_list = user_dict['fork_repos_url']
+                # add it to the databse only when the threshold is met
+                if (len(starred_repos_id_list) >= cfg.threshold or
+                    len(subscriptions_id_list) >= cfg.threshold or
+                    len(fork_repos_id_list) >= cfg.threshold):
+                    user_id = user_dict['_id']
+                    exist_user = users.find_one({'_id': user_id})
+                    if exist_user is None:
+                        users.insert_one(user_dict)
+                        logging.info('An user was added!')
+                    # add repos
+                    if len(starred_repos_id_list) >= cfg.threshold:
+                        add_repos(starred_repos_id_list, starred_repos_url_list)
+                    if len(subscriptions_id_list) >= cfg.threshold:
+                        add_repos(subscriptions_id_list, subscriptions_url_list)
+                    if len(fork_repos_id_list) >= cfg.threshold:
+                        add_repos(fork_repos_id_list, fork_repos_url_list)
+    close()
 
 if __name__ == "__main__":
     process_gzip_files()
