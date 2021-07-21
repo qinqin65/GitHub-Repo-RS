@@ -166,6 +166,22 @@ def construct_knowledge_graph():
         ('user', 'fork', 'repo'): (nodes_fork[0], nodes_fork[1]),
         ('user', 'own', 'repo'): (nodes_own[0], nodes_own[1])
     }, num_nodes_dict=num_nodes_dict, device='cuda')
+    
+    # normalize the data
+    # X_std = (X - X.min(axis=0)) / (X.max(axis=0) - X.min(axis=0))
+    # reference to https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.MinMaxScaler.html
+    user_data = graph_data['user']
+    user_data_min = user_data.min(0, keepdim=True)[0]
+    user_data_max = user_data.max(0, keepdim=True)[0]
+    user_data_normalized = (user_data - user_data_min) / (user_data_max - user_data_min)
+    graph_data['user'] = user_data_normalized
+
+    repo_data = graph_data['repo']
+    repo_data_min = repo_data.min(0, keepdim=True)[0]
+    repo_data_max = repo_data.max(0, keepdim=True)[0]
+    repo_data_normalized = (repo_data - repo_data_min) / (repo_data_max - repo_data_min)
+    graph_data['repo'] = repo_data_normalized
+
     # set the node data
     g.ndata['graph_data'] = graph_data
 
