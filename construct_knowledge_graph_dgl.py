@@ -1,7 +1,5 @@
-from operator import mod
 import dgl
 import numpy as np
-from numpy.core.numeric import full
 import pandas as pd
 import pickle
 from db_manager import users, repositories, close
@@ -21,13 +19,20 @@ def construct_knowledge_graph():
     # map repository ids to new ids which start from 1
     repos_id_map = {}
     repo_id_counter = 0
-    # 3D table to store users-repositories interactions
-    interactions = {
-        'watch': pd.DataFrame(np.zeros((users_count, repos_count), np.int8)),
-        'star': pd.DataFrame(np.zeros((users_count, repos_count), np.int8)),
-        'fork': pd.DataFrame(np.zeros((users_count, repos_count), np.int8)),
-        'own': pd.DataFrame(np.zeros((users_count, repos_count), np.int8))
+    # interactions map
+    interactions_map = {
+        'watch': 0,
+        'star': 1,
+        'fork': 2,
+        'own': 3
     }
+    # 3D table to store users-repositories interactions
+    interactions = (
+        pd.DataFrame(np.zeros((users_count, repos_count), np.int8)),
+        pd.DataFrame(np.zeros((users_count, repos_count), np.int8)),
+        pd.DataFrame(np.zeros((users_count, repos_count), np.int8)),
+        pd.DataFrame(np.zeros((users_count, repos_count), np.int8))
+    )
 
     for user in all_users:
         if user['_id'] not in users_id_map:
@@ -47,31 +52,31 @@ def construct_knowledge_graph():
             current_repo_id = repos_id_map[repo['_id']]
 
             # watch interaction
-            watch_interaction = interactions['watch']
+            watch_interaction = interactions[interactions_map['watch']]
             watched_repos = user['subscriptions_id']
             if repo['_id'] in watched_repos:
                 watch_interaction.iloc[current_user_id, current_repo_id] = 1
             # star interaction
-            star_interaction = interactions['star']
+            star_interaction = interactions[interactions_map['star']]
             starred_repos = user['starred_repos_id']
             if repo['_id'] in starred_repos:
                 star_interaction.iloc[current_user_id, current_repo_id] = 1
             # fork interaction
-            fork_interaction = interactions['fork']
+            fork_interaction = interactions[interactions_map['fork']]
             fork_repos = user['fork_repos_id']
             if repo['_id'] in fork_repos:
                 fork_interaction.iloc[current_user_id, current_repo_id] = 1
             # own interaction
-            own_interaction = interactions['own']
+            own_interaction = interactions[interactions_map['own']]
             own_repos = user['own_repos_id']
             if repo['_id'] in own_repos:
                 own_interaction.iloc[current_user_id, current_repo_id] = 1
 
     # construct source and destination nodes
-    nodes_watch = np.where(interactions['watch'] == 1)
-    nodes_star = np.where(interactions['star'] == 1)
-    nodes_fork = np.where(interactions['fork'] == 1)
-    nodes_own = np.where(interactions['own'] == 1)
+    nodes_watch = np.where(interactions[interactions_map['watch']] == 1)
+    nodes_star = np.where(interactions[interactions_map['star']] == 1)
+    nodes_fork = np.where(interactions[interactions_map['fork']] == 1)
+    nodes_own = np.where(interactions[interactions_map['own']] == 1)
 
     num_nodes_dict = { 'user': users_count, 'repo': repos_count }
 
@@ -85,10 +90,11 @@ def construct_knowledge_graph():
 
     close()
 
-    return g, users_id_map, repos_id_map
+    return g, users_id_map, repos_id_map, interactions_map
 
 if __name__ == "__main__":
-    knowledge_graph, users_id_map, repos_id_map = construct_knowledge_graph()
+    knowledge_graph, users_id_map, repos_id_map, interactions_map = construct_knowledge_graph()
     dgl.save_graphs('./data/saved_kowledge_graph.bin', [knowledge_graph])
     pickle.dump(users_id_map, open('./data/users_id_map.p', 'wb'))
     pickle.dump(repos_id_map, open('./data/repos_id_map.p', 'wb'))
+    pickle.dump(interactions_map, open('./data/interactions_map.p', 'wb'))
