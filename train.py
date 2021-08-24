@@ -50,7 +50,7 @@ def train():
     
     # construct the model for each interaction
     for interaction, index in interactions_map.items():
-        g0.edges[interaction].data['e'] = torch.from_numpy(np.tile(relation_embedding[index], (g0.num_edges(etype=interaction), 1)))
+        # g0.edges[interaction].data['e'] = torch.from_numpy(np.tile(relation_embedding[index], (g0.num_edges(etype=interaction), 1)))
         p = projection[index].reshape(EMBEDDING_LENGTH, EMBEDDING_LENGTH)
         
         g0.nodes['user'].data['h_%s' % interaction] = g0.nodes['user'].data['h'] @ p

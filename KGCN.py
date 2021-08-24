@@ -13,11 +13,7 @@ class KGCN(nn.Module):
 
     def forward(self, g):
         with g.local_scope():
-            g.apply_edges(fn.u_dot_e('h_%s' % self.etype, 'e', 'pi_r_u'), etype=self.etype)
-            g.edges[self.etype].data['pi_r_u_exp'] = torch.exp(g.edges[self.etype].data['pi_r_u'])
-            g.update_all(fn.copy_e('pi_r_u_exp', 'm'), fn.sum('m', 'pi_r_u_exp_sum'), etype=self.etype)
-            g.apply_edges(fn.e_div_v('pi_r_u_exp', 'pi_r_u_exp_sum', 'pi_normalized'), etype=self.etype)
-            g.update_all(fn.u_mul_e('h_%s' % self.etype, 'pi_normalized', 'm'), fn.sum('m', 'h_sum'), etype=self.etype)
+            g.update_all(fn.copy_u('h_%s' % self.etype, 'm'), fn.sum('m', 'h_sum'), etype=self.etype)
             h_sum = g.nodes['repo'].data['h_sum']
             h_total = self.aggregate(g.nodes['repo'].data['h_%s' % self.etype], h_sum)
             return self.linear(h_total)
