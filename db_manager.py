@@ -1,4 +1,3 @@
-from os import close
 import config as cfg
 import pymongo
 
