@@ -34,6 +34,8 @@ def get_json_from_url(url: str):
         logging.error('An error occured when requesting content from this url: %s' % url)
         return -1
     if 'message' in req_json:
+        if req_json['message'].find('API rate limit exceeded for user') != -1:
+            return check_rate_limit(get_json_from_url)(url)
         logging.error('This url: %s, returns an error: %s' % (url, req_json['message']))
         return -1
     return req_json
@@ -57,9 +59,9 @@ def check_rate_limit(func):
 
         if remaining == 0:
             time_diff = reset - datetime.datetime.now().timestamp()
-            time_diff = math.ceil(time_diff)
+            time_diff = math.ceil(time_diff) + 1
             logging.warning('Limit reached, sleep for %s seconds!' % time_diff)
-            sleep(time_diff)
+            sleep(max(time_diff, 1))
         
         return func(*args, **kwargs)
     return wrapper
