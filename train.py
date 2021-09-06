@@ -8,6 +8,7 @@ from KGCN import Model
 
 def train():
     EPOCH = 100
+    TOP_K = 10
 
     users_id_map = pickle.load(open('./data/users_id_map.p', 'rb'))
     repos_id_map = pickle.load(open('./data/repos_id_map.p', 'rb'))
@@ -36,11 +37,13 @@ def train():
     repo_feat = g0.ndata['graph_data']['repo']
     
     labels = torch.zeros((number_of_users, number_of_repos))
+    tests = torch.zeros((number_of_users, number_of_repos))
 
     for interaction, index in interactions_map.items():
         edge = g0.edges(etype=interaction)
         labels[edge[0], edge[1]] = 1
-    
+        tests[edge[0], edge[1]] = interactions_map[index] + 1
+
     labels = torch.flatten(labels)
     
     model = Model(g0, 150, 261, 50)
@@ -59,6 +62,21 @@ def train():
         val_acc = (logits[valid_mask] == labels[valid_mask]).float().mean()
         test_acc = (logits[test_mask] == labels[test_mask]).float().mean()
 
+        # top k recommendation
+        hit_rates = np.zeros(number_of_users)
+        user_repo_rating = logits.reshape(number_of_users, number_of_repos)
+        for i, rating in enumerate(user_repo_rating):
+            recommendation = rating.argsort()[-TOP_K:]
+            ground_truth = tests.argsort()[-TOP_K:]
+
+            recommendation_set = set(recommendation)
+            ground_truth_set = set(ground_truth)
+
+            intersections = recommendation_set.intersection(ground_truth)
+            hit_rate = len(intersections) / len(ground_truth_set)
+            hit_rates[i] = hit_rate
+        mean_hit_rate = np.mean(hit_rates)
+
         # Save the best validation accuracy and the corresponding test accuracy.
         if best_val_acc < val_acc:
             best_val_acc = val_acc
@@ -70,8 +88,8 @@ def train():
         optimizer.step()
 
         if epoch % 5 == 0:
-            print('In epoch {}, loss: {:.3f}, val acc: {:.3f} (best {:.3f}), test acc: {:.3f} (best {:.3f})'.format(
-                epoch, loss, val_acc, best_val_acc, test_acc, best_test_acc))
+            print('In epoch {}, loss: {:.3f}, hit rate: {:.3f}, val acc: {:.3f} (best {:.3f}), test acc: {:.3f} (best {:.3f})'.format(
+                epoch, loss, mean_hit_rate, val_acc, best_val_acc, test_acc, best_test_acc))
 
 if __name__ == '__main__':
     train()
