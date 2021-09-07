@@ -42,7 +42,7 @@ def train():
     for interaction, index in interactions_map.items():
         edge = g0.edges(etype=interaction)
         labels[edge[0], edge[1]] = 1
-        tests[edge[0], edge[1]] = interactions_map[index] + 1
+        tests[edge[0], edge[1]] = interactions_map[interaction] + 1
 
     labels = torch.flatten(labels)
     
@@ -66,15 +66,16 @@ def train():
         hit_rates = np.zeros(number_of_users)
         user_repo_rating = logits.reshape(number_of_users, number_of_repos)
         for i, rating in enumerate(user_repo_rating):
-            recommendation = rating.argsort()[-TOP_K:]
-            ground_truth = tests.argsort()[-TOP_K:]
+            recommendation = rating.detach().numpy()
+            recommendation = recommendation.argsort()[-TOP_K:]
+            ground_truth = np.where(tests[i]>0)[0]
 
             recommendation_set = set(recommendation)
             ground_truth_set = set(ground_truth)
 
-            intersections = recommendation_set.intersection(ground_truth)
-            hit_rate = len(intersections) / len(ground_truth_set)
-            hit_rates[i] = hit_rate
+            intersections = recommendation_set.intersection(ground_truth_set)
+            hit_rate = 0 if len(ground_truth_set) == 0 else len(intersections) / max(len(ground_truth_set), TOP_K)
+            hit_rates[i] = min(hit_rate, 1)
         mean_hit_rate = np.mean(hit_rates)
 
         # Save the best validation accuracy and the corresponding test accuracy.
