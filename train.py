@@ -4,11 +4,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import pickle
-from KGCN import Model
+from KGCN import Model, loss_fn
 
 def train():
     EPOCH = 100
     TOP_K = 10
+    neg_sample_size = 5
 
     users_id_map = pickle.load(open('./data/users_id_map.p', 'rb'))
     repos_id_map = pickle.load(open('./data/repos_id_map.p', 'rb'))
@@ -32,9 +33,6 @@ def train():
     train_mask = sample_indexes==0
     valid_mask = sample_indexes==1
     test_mask = sample_indexes==2
-
-    user_feat = g0.ndata['graph_data']['user']
-    repo_feat = g0.ndata['graph_data']['repo']
     
     labels = torch.zeros((number_of_users, number_of_repos))
     tests = torch.zeros((number_of_users, number_of_repos))
@@ -49,48 +47,60 @@ def train():
     model = Model(g0, 150, 261, 50)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
+    sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
+    edges_fork = g0.edges(etype=('user', 'fork', 'repo'))
+    edges_own = g0.edges(etype=('user', 'own', 'repo'))
+    edges_star = g0.edges(etype=('user', 'star', 'repo'))
+    edges_watch = g0.edges(etype=('user', 'watch', 'repo'))
+    train_eid = {('user', 'fork', 'repo'): g0.edge_ids(edges_fork[0], edges_fork[1], etype=('user', 'fork', 'repo')),
+        ('user', 'own', 'repo'): g0.edge_ids(edges_own[0], edges_own[1], etype=('user', 'own', 'repo')),
+        ('user', 'star', 'repo'): g0.edge_ids(edges_star[0], edges_star[1], etype=('user', 'star', 'repo')),
+        ('user', 'watch', 'repo'): g0.edge_ids(edges_watch[0], edges_watch[1], etype=('user', 'watch', 'repo'))}
+    dataloader = dgl.dataloading.EdgeDataLoader(
+    g0, train_eid, sampler,
+    negative_sampler=dgl.dataloading.negative_sampler.Uniform(neg_sample_size),
+    batch_size=1024, shuffle=True, drop_last=False)
+
     best_val_acc = 0
     best_test_acc = 0
 
     for epoch in range(EPOCH):
-        logits = model(g0, user_feat, repo_feat)
-        loss = F.binary_cross_entropy_with_logits(logits[train_mask], labels[train_mask])
+        i = 0
+        total_loss = 0
+        for input_nodes, pos_g, neg_g, blocks in dataloader:
+            user_feat = blocks[0].ndata['graph_data']['user']
+            repo_feat = blocks[0].ndata['graph_data']['repo']
+            pos_score, neg_score = model(blocks, pos_g, neg_g, user_feat, repo_feat)
+            loss = loss_fn(pos_score, neg_score, neg_sample_size)
 
-        logits[logits>0.5] = 1
-        # Compute accuracy on training/validation/test
-        train_acc = (logits[train_mask] == labels[train_mask]).float().mean()
-        val_acc = (logits[valid_mask] == labels[valid_mask]).float().mean()
-        test_acc = (logits[test_mask] == labels[test_mask]).float().mean()
+            total_loss += loss.item()
 
-        # top k recommendation
-        hit_rates = np.zeros(number_of_users)
-        user_repo_rating = logits.reshape(number_of_users, number_of_repos)
-        for i, rating in enumerate(user_repo_rating):
-            recommendation = rating.detach().numpy()
-            recommendation = recommendation.argsort()[-TOP_K:]
-            ground_truth = np.where(tests[i]>0)[0]
+            # top k recommendation
+            # hit_rates = np.zeros(number_of_users)
+            # user_repo_rating = logits.reshape(number_of_users, number_of_repos)
+            # for i, rating in enumerate(user_repo_rating):
+            #     recommendation = rating.detach().numpy()
+            #     recommendation = recommendation.argsort()[-TOP_K:]
+            #     ground_truth = np.where(tests[i]>0)[0]
 
-            recommendation_set = set(recommendation)
-            ground_truth_set = set(ground_truth)
+            #     recommendation_set = set(recommendation)
+            #     ground_truth_set = set(ground_truth)
 
-            intersections = recommendation_set.intersection(ground_truth_set)
-            hit_rate = 0 if len(ground_truth_set) == 0 else len(intersections) / max(len(ground_truth_set), TOP_K)
-            hit_rates[i] = min(hit_rate, 1)
-        mean_hit_rate = np.mean(hit_rates)
+            #     intersections = recommendation_set.intersection(ground_truth_set)
+            #     hit_rate = 0 if len(ground_truth_set) == 0 else len(intersections) / max(len(ground_truth_set), TOP_K)
+            #     hit_rates[i] = min(hit_rate, 1)
+            # mean_hit_rate = np.mean(hit_rates)
 
-        # Save the best validation accuracy and the corresponding test accuracy.
-        if best_val_acc < val_acc:
-            best_val_acc = val_acc
-            best_test_acc = test_acc
+            # Backward
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        # Backward
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        train_avg_loss = total_loss / i
 
         if epoch % 5 == 0:
-            print('In epoch {}, loss: {:.3f}, hit rate: {:.3f}, val acc: {:.3f} (best {:.3f}), test acc: {:.3f} (best {:.3f})'.format(
-                epoch, loss, mean_hit_rate, val_acc, best_val_acc, test_acc, best_test_acc))
+            print('In epoch {}, loss: {:.3f}, hit rate: {:.3f}'.format(
+                epoch, train_avg_loss, 0))
 
 if __name__ == '__main__':
     train()
