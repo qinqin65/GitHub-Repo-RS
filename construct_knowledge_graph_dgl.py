@@ -85,7 +85,7 @@ def construct_knowledge_graph():
         pd.DataFrame(np.zeros((users_count, repos_count), np.int8))
     )
     # set the device for torch
-    device = torch.device('cuda')
+    device = torch.device('cpu')
     # graph data
     graph_data = {
         'user': torch.zeros([users_count, 150], dtype=torch.float32, device=device), # 3 vectors with size 50
@@ -187,10 +187,14 @@ def construct_knowledge_graph():
     # construct the heterograph from the dataframe
     g = dgl.heterograph({
         ('user', 'star', 'repo'): (nodes_star[0], nodes_star[1]),
+        ('repo', 'starred-by', 'user'): (nodes_star[1], nodes_star[0]),
         ('user', 'watch', 'repo'): (nodes_watch[0], nodes_watch[1]),
+        ('repo', 'watched-by', 'user'): (nodes_watch[1], nodes_watch[0]),
         ('user', 'fork', 'repo'): (nodes_fork[0], nodes_fork[1]),
-        ('user', 'own', 'repo'): (nodes_own[0], nodes_own[1])
-    }, num_nodes_dict=num_nodes_dict, device='cuda')
+        ('repo', 'forked-by', 'user'): (nodes_fork[1], nodes_fork[0]),
+        ('user', 'own', 'repo'): (nodes_own[0], nodes_own[1]),
+        ('repo', 'owned-by', 'user'): (nodes_own[1], nodes_own[0])
+    }, num_nodes_dict=num_nodes_dict, device=device)
     
     # normalize the data
     # X_std = (X - X.min(axis=0)) / (X.max(axis=0) - X.min(axis=0))
