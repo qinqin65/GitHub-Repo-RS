@@ -58,26 +58,10 @@ class Model(nn.Module):
 
         h = self.hidden(blocks[0], h_dict)
         
-        h_current_user = self.hidden_current_user(h_user)
-        h_current_repo = self.hidden_current_repo(h_repo)
-        out_dict = {
-            'user': F.relu(self.aggregate(h_current_user, h['user']) if 'user' in h else h_current_user),
-            'repo': F.relu(self.aggregate(h_current_repo, h['repo']))
-        }
+        out = self.out(blocks[1], h)
         
-        out = self.out(blocks[1], out_dict)
-        
-        out_current_user = self.out_current_user(out_dict['user'])
-        out_current_repo = self.out_current_repo(out_dict['repo'])
-        h_user_new = F.relu(self.aggregate(out_current_user, out['user']) if 'user' in out else out_current_user)
-        h_repo_new = F.relu(self.aggregate(out_current_repo, out['repo']))
-        h_dict_new = {
-            'user': h_user_new,
-            'repo': h_repo_new
-        }
-        
-        pos_score = self.predict(pos_g, h_dict_new)
-        neg_score = self.predict(neg_g, h_dict_new)
+        pos_score = self.predict(pos_g, out)
+        neg_score = self.predict(neg_g, out)
         
         return pos_score, neg_score
 

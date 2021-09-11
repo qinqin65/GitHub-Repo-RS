@@ -14,17 +14,14 @@ class StochasticTwoLayerGCN(nn.Module):
         self.conv2 = dglnn.HeteroGraphConv(
             { etype[1]: dglnn.GraphConv(hidden_features, out_features) for etype in g.canonical_etypes },
             aggregate='sum')
-        self.user_hidden = nn.Linear(in_features, hidden_features)
-        self.user_out = nn.Linear(hidden_features, out_features)
 
     def forward(self, blocks, x):
-        user = F.relu(self.user_hidden(x['user']))
         x = self.conv1(blocks[0], x)
         x['game'] = F.relu(x['game'])
-        x['user'] = user
+        x['user'] = F.relu(x['user'])
         x = self.conv2(blocks[1], x)
         x['game'] = F.relu(x['game'])
-        x['user'] = F.relu(self.user_out(user))
+        x['user'] = F.relu(x['user'])
         return x
 
 class ScorePredictor(nn.Module):
@@ -33,8 +30,10 @@ class ScorePredictor(nn.Module):
             for etype in g.canonical_etypes:
                 try:
                     edge_subgraph.nodes[etype[0]].data['x'] = x[etype[0]]
+                    edge_subgraph.nodes[etype[2]].data['x'] = x[etype[2]]
                     edge_subgraph.apply_edges(dgl.function.u_dot_v('x', 'x', 'score'), etype=etype)
-                except KeyError:
+                except KeyError as e:
+                    print(e)
                     pass
 
             return edge_subgraph.edata['score']
@@ -54,13 +53,22 @@ class Model(nn.Module):
 
 def compute_loss(pos_score, neg_score):
     # an example hinge loss
-    n = pos_score.shape[0]
-    return (neg_score.view(n, -1) - pos_score.view(n, -1) + 1).clamp(min=0).mean()
+    score = 0
+    i = 0
+    for etype in pos_score.keys():
+        neg_score_tensor = neg_score[etype]
+        pos_score_tensor = pos_score[etype]
+        n = pos_score_tensor.shape[0]
+        score += (neg_score_tensor.view(n, -1) - pos_score_tensor.view(n, -1) + 1).clamp(min=0).mean()
+        i += 1
+    return score / i
 
 if __name__ == "__main__":
     data_dict = {
         ('user', 'buys', 'game'): (torch.tensor([1, 1]), torch.tensor([1, 2])),
-        ('user', 'plays', 'game'): (torch.tensor([0, 3]), torch.tensor([3, 4]))
+        ('user', 'plays', 'game'): (torch.tensor([0, 3]), torch.tensor([3, 4])),
+        ('game', 'bought-by', 'user'): (torch.tensor([1, 2]), torch.tensor([1, 1])),
+        ('game', 'played-by', 'user'): (torch.tensor([3, 4]), torch.tensor([0, 3]))
     }
     g = dgl.heterograph(data_dict)
     g.ndata['features'] = {
@@ -79,6 +87,9 @@ if __name__ == "__main__":
     dataloader = dgl.dataloading.EdgeDataLoader(
     g, train_seeds, sampler,
     negative_sampler=dgl.dataloading.negative_sampler.Uniform(2),
+    exclude='reverse_types',
+    reverse_etypes={'buys': 'bought-by', 'bought-by': 'buys',
+                    'plays': 'played-by', 'played-by': 'plays'},
     batch_size=2,
     shuffle=True,
     drop_last=False,
@@ -87,11 +98,12 @@ if __name__ == "__main__":
     model = Model(g, 10, 5, 2)
     opt = torch.optim.Adam(model.parameters())
 
-    for input_nodes, positive_graph, negative_graph, blocks in dataloader:
-        input_features = blocks[0].srcdata['features']
-        pos_score, neg_score = model(positive_graph, negative_graph, blocks, input_features)
-        loss = compute_loss(pos_score, neg_score)
-        print(loss.item())
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
+    for epoch in range(10):
+        for input_nodes, positive_graph, negative_graph, blocks in dataloader:
+            input_features = blocks[0].srcdata['features']
+            pos_score, neg_score = model(positive_graph, negative_graph, blocks, input_features)
+            loss = compute_loss(pos_score, neg_score)
+            print(loss.item())
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
