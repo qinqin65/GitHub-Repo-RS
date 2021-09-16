@@ -131,7 +131,7 @@ def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
         non_test_filter = test_data[i] == 0
         rating[non_test_filter] == 0
         recommendation = rating.argsort()[-top_k:]
-        ground_truth = test_data.argsort()[-top_k:]
+        ground_truth = test_data[i].argsort()[-top_k:]
 
         recommendation_set = set(recommendation)
         ground_truth_set = set(ground_truth)
