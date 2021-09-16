@@ -35,7 +35,5 @@ def construct_sub_knowledge_graph():
 
 if __name__ == "__main__":
     train_sub_graph, valid_sub_graph, test_sub_graph = construct_sub_knowledge_graph()
-    pickle.dump(train_sub_graph, open('./data/train_sub_graph.p', 'wb'))
-    pickle.dump(valid_sub_graph, open('./data/valid_sub_graph.p', 'wb'))
-    pickle.dump(test_sub_graph, open('./data/test_sub_graph.p', 'wb'))
+    dgl.save_graphs('./data/sub_kowledge_graph.bin', [train_sub_graph, valid_sub_graph, test_sub_graph])
 
