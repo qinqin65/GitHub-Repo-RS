@@ -175,26 +175,6 @@ def construct_knowledge_graph():
             own_repos = user['own_repos_id']
             if repo['_id'] in own_repos:
                 own_interaction.iloc[current_user_id, current_repo_id] = 1
-
-    # construct source and destination nodes
-    nodes_watch = np.where(interactions[interactions_map['watch']] == 1)
-    nodes_star = np.where(interactions[interactions_map['star']] == 1)
-    nodes_fork = np.where(interactions[interactions_map['fork']] == 1)
-    nodes_own = np.where(interactions[interactions_map['own']] == 1)
-
-    num_nodes_dict = { 'user': users_count, 'repo': repos_count }
-
-    # construct the heterograph from the dataframe
-    g = dgl.heterograph({
-        ('user', 'star', 'repo'): (nodes_star[0], nodes_star[1]),
-        ('repo', 'starred-by', 'user'): (nodes_star[1], nodes_star[0]),
-        ('user', 'watch', 'repo'): (nodes_watch[0], nodes_watch[1]),
-        ('repo', 'watched-by', 'user'): (nodes_watch[1], nodes_watch[0]),
-        ('user', 'fork', 'repo'): (nodes_fork[0], nodes_fork[1]),
-        ('repo', 'forked-by', 'user'): (nodes_fork[1], nodes_fork[0]),
-        ('user', 'own', 'repo'): (nodes_own[0], nodes_own[1]),
-        ('repo', 'owned-by', 'user'): (nodes_own[1], nodes_own[0])
-    }, num_nodes_dict=num_nodes_dict, device=device)
     
     # normalize the data
     # X_std = (X - X.min(axis=0)) / (X.max(axis=0) - X.min(axis=0))
@@ -203,24 +183,125 @@ def construct_knowledge_graph():
     user_data_min = user_data.min(0, keepdim=True)[0]
     user_data_max = user_data.max(0, keepdim=True)[0]
     user_data_normalized = (user_data - user_data_min) / (user_data_max - user_data_min)
-    graph_data['user'] = user_data_normalized
 
     repo_data = graph_data['repo']
     repo_data_min = repo_data.min(0, keepdim=True)[0]
     repo_data_max = repo_data.max(0, keepdim=True)[0]
     repo_data_normalized = (repo_data - repo_data_min) / (repo_data_max - repo_data_min)
-    graph_data['repo'] = repo_data_normalized
+
+    # generate the train, validation and test mask
+    train_number = round(users_count * 0.6)
+    valid_number = round(users_count * 0.2)
+    test_number = users_count - train_number - valid_number
+    sample_indexes = np.array([0] * train_number + [1] * valid_number + [2] * test_number)
+    np.random.shuffle(sample_indexes)
+    
+    train_mask = sample_indexes==0
+    valid_mask = sample_indexes==1
+    test_mask = sample_indexes==2
+
+    # split train, validation and test data set
+    watch_train = interactions[interactions_map['watch']][train_mask]
+    star_train = interactions[interactions_map['star']][train_mask]
+    fork_train = interactions[interactions_map['fork']][train_mask]
+    own_train = interactions[interactions_map['own']][train_mask]
+
+    watch_valid = interactions[interactions_map['watch']][valid_mask]
+    star_valid = interactions[interactions_map['star']][valid_mask]
+    fork_valid = interactions[interactions_map['fork']][valid_mask]
+    own_valid = interactions[interactions_map['own']][valid_mask]
+
+    watch_test = interactions[interactions_map['watch']][test_mask]
+    star_test = interactions[interactions_map['star']][test_mask]
+    fork_test = interactions[interactions_map['fork']][test_mask]
+    own_test = interactions[interactions_map['own']][test_mask]
+
+    # construct source and destination nodes
+    nodes_watch_train = np.where(watch_train == 1)
+    nodes_star_train = np.where(star_train == 1)
+    nodes_fork_train = np.where(fork_train == 1)
+    nodes_own_train = np.where(own_train == 1)
+
+    nodes_watch_valid = np.where(watch_valid == 1)
+    nodes_star_valid = np.where(star_valid == 1)
+    nodes_fork_valid = np.where(fork_valid == 1)
+    nodes_own_valid = np.where(own_valid == 1)
+
+    nodes_watch_test = np.where(watch_test == 1)
+    nodes_star_test = np.where(star_test == 1)
+    nodes_fork_test = np.where(fork_test == 1)
+    nodes_own_test = np.where(own_test == 1)
+
+    # construct the heterograph from the dataframe
+    g_train = dgl.heterograph({
+        ('user', 'star', 'repo'): (nodes_star_train[0], nodes_star_train[1]),
+        ('repo', 'starred-by', 'user'): (nodes_star_train[1], nodes_star_train[0]),
+        ('user', 'watch', 'repo'): (nodes_watch_train[0], nodes_watch_train[1]),
+        ('repo', 'watched-by', 'user'): (nodes_watch_train[1], nodes_watch_train[0]),
+        ('user', 'fork', 'repo'): (nodes_fork_train[0], nodes_fork_train[1]),
+        ('repo', 'forked-by', 'user'): (nodes_fork_train[1], nodes_fork_train[0]),
+        ('user', 'own', 'repo'): (nodes_own_train[0], nodes_own_train[1]),
+        ('repo', 'owned-by', 'user'): (nodes_own_train[1], nodes_own_train[0])
+    }, num_nodes_dict={ 'user': train_number, 'repo': repos_count }, device=device)
 
     # set the node data
-    g.ndata['graph_data'] = graph_data
+    graph_data_train = {
+        'user': user_data_normalized[train_mask],
+        'repo': repo_data_normalized
+    }
+    g_train.ndata['graph_data'] = graph_data_train
+
+    g_valid = dgl.heterograph({
+        ('user', 'star', 'repo'): (nodes_star_valid[0], nodes_star_valid[1]),
+        ('repo', 'starred-by', 'user'): (nodes_star_valid[1], nodes_star_valid[0]),
+        ('user', 'watch', 'repo'): (nodes_watch_valid[0], nodes_watch_valid[1]),
+        ('repo', 'watched-by', 'user'): (nodes_watch_valid[1], nodes_watch_valid[0]),
+        ('user', 'fork', 'repo'): (nodes_fork_valid[0], nodes_fork_valid[1]),
+        ('repo', 'forked-by', 'user'): (nodes_fork_valid[1], nodes_fork_valid[0]),
+        ('user', 'own', 'repo'): (nodes_own_valid[0], nodes_own_valid[1]),
+        ('repo', 'owned-by', 'user'): (nodes_own_valid[1], nodes_own_valid[0])
+    }, num_nodes_dict={ 'user': valid_number, 'repo': repos_count }, device=device)
+
+    # set the node data
+    graph_data_valid = {
+        'user': user_data_normalized[valid_mask],
+        'repo': repo_data_normalized
+    }
+    g_valid.ndata['graph_data'] = graph_data_valid
+
+    g_test = dgl.heterograph({
+        ('user', 'star', 'repo'): (nodes_star_test[0], nodes_star_test[1]),
+        ('repo', 'starred-by', 'user'): (nodes_star_test[1], nodes_star_test[0]),
+        ('user', 'watch', 'repo'): (nodes_watch_test[0], nodes_watch_test[1]),
+        ('repo', 'watched-by', 'user'): (nodes_watch_test[1], nodes_watch_test[0]),
+        ('user', 'fork', 'repo'): (nodes_fork_test[0], nodes_fork_test[1]),
+        ('repo', 'forked-by', 'user'): (nodes_fork_test[1], nodes_fork_test[0]),
+        ('user', 'own', 'repo'): (nodes_own_test[0], nodes_own_test[1]),
+        ('repo', 'owned-by', 'user'): (nodes_own_test[1], nodes_own_test[0])
+    }, num_nodes_dict={ 'user': test_number, 'repo': repos_count }, device=device)
+
+    # set the node data
+    graph_data_test = {
+        'user': user_data_normalized[test_mask],
+        'repo': repo_data_normalized
+    }
+    g_test.ndata['graph_data'] = graph_data_test
 
     close()
 
-    return g, users_id_map, repos_id_map, interactions_map
+    return g_train, g_valid, g_test, users_id_map, repos_id_map, interactions_map
 
 if __name__ == "__main__":
-    knowledge_graph, users_id_map, repos_id_map, interactions_map = construct_knowledge_graph()
-    dgl.save_graphs('./data/saved_kowledge_graph.bin', [knowledge_graph])
+    (knowledge_graph_train, 
+    knowledge_graph_valid, 
+    knowledge_graph_test, 
+    users_id_map, 
+    repos_id_map, 
+    interactions_map) = construct_knowledge_graph()
+    dgl.save_graphs('./data/kowledge_graphs.bin', [
+        knowledge_graph_train, 
+        knowledge_graph_valid, 
+        knowledge_graph_test])
     pickle.dump(users_id_map, open('./data/users_id_map.p', 'wb'))
     pickle.dump(repos_id_map, open('./data/repos_id_map.p', 'wb'))
     pickle.dump(interactions_map, open('./data/interactions_map.p', 'wb'))
