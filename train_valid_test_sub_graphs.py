@@ -62,47 +62,44 @@ def construct_sub_knowledge_graph():
     watch_edges = g0.edges(etype=('user', 'watch', 'repo'))
     watch_eids = g0.edge_ids(watch_edges[0], watch_edges[1], etype=('user', 'watch', 'repo'))
 
-    watched_by_edges = g0.edges(etype=('user', 'watched-by', 'repo'))
-    watched_by_eids = g0.edge_ids(watched_by_edges[0], watched_by_edges[1], etype=('user', 'watched-by', 'repo'))
-
     star_edges = g0.edges(etype=('user', 'star', 'repo'))
     star_eids = g0.edge_ids(star_edges[0], star_edges[1], etype=('user', 'star', 'repo'))
-
-    starred_by_edges = g0.edges(etype=('user', 'starred-by', 'repo'))
-    starred_by_eids = g0.edge_ids(starred_by_edges[0], starred_by_edges[1], etype=('user', 'starred-by', 'repo'))
 
     fork_edges = g0.edges(etype=('user', 'fork', 'repo'))
     fork_eids = g0.edge_ids(fork_edges[0], fork_edges[1], etype=('user', 'fork', 'repo'))
 
-    forked_by_edges = g0.edges(etype=('user', 'forked-by', 'repo'))
-    forked_by_eids = g0.edge_ids(forked_by_edges[0], forked_by_edges[1], etype=('user', 'forked-by', 'repo'))
-
     own_edges = g0.edges(etype=('user', 'own', 'repo'))
     own_eids = g0.edge_ids(own_edges[0], own_edges[1], etype=('user', 'own', 'repo'))
 
-    owned_by_edges = g0.edges(etype=('user', 'owned-by', 'repo'))
-    owned_by_eids = g0.edge_ids(owned_by_edges[0], owned_by_edges[1], etype=('user', 'owned-by', 'repo'))
-
     train_sub_graph = dgl.edge_subgraph(g0, {
         ('user', 'watch', 'repo'): watch_eids[watch_train_mask],
-        ('user', 'watched-by', 'repo'): watch_eids[watch_train_mask], 
+        ('repo', 'watched-by', 'user'): watch_eids[watch_train_mask], 
         ('user', 'star', 'repo'): star_eids[star_train_mask],
-        ('user', 'starred-by', 'repo'): star_eids[star_train_mask],
+        ('repo', 'starred-by', 'user'): star_eids[star_train_mask],
         ('user', 'fork', 'repo'): fork_eids[fork_train_mask],
-        ('user', 'forked-by', 'repo'): forked_by_eids[fork_train_mask],
-        ('user', 'own', 'repo'): own_eids[own_train_mask]
+        ('repo', 'forked-by', 'user'): fork_eids[fork_train_mask],
+        ('user', 'own', 'repo'): own_eids[own_train_mask],
+        ('repo', 'owned-by', 'user'): own_eids[own_train_mask]
     })
     valid_sub_graph = dgl.edge_subgraph(g0, {
-        ('user', 'watch', 'repo'): watch_eids[watch_valid_mask], 
+        ('user', 'watch', 'repo'): watch_eids[watch_valid_mask],
+        ('repo', 'watched-by', 'user'): watch_eids[watch_valid_mask], 
         ('user', 'star', 'repo'): star_eids[star_valid_mask],
+        ('repo', 'starred-by', 'user'): star_eids[star_valid_mask],
         ('user', 'fork', 'repo'): fork_eids[fork_valid_mask],
-        ('user', 'own', 'repo'): own_eids[own_valid_mask]
+        ('repo', 'forked-by', 'user'): fork_eids[fork_valid_mask],
+        ('user', 'own', 'repo'): own_eids[own_valid_mask],
+        ('repo', 'owned-by', 'user'): own_eids[own_valid_mask]
     })
     test_sub_graph = dgl.edge_subgraph(g0, {
         ('user', 'watch', 'repo'): watch_eids[watch_test_mask], 
+        ('repo', 'watched-by', 'user'): watch_eids[watch_test_mask],
         ('user', 'star', 'repo'): star_eids[star_test_mask],
+        ('repo', 'starred-by', 'user'): star_eids[star_test_mask],
         ('user', 'fork', 'repo'): fork_eids[fork_test_mask],
-        ('user', 'own', 'repo'): own_eids[own_test_mask]
+        ('repo', 'forked-by', 'user'): fork_eids[fork_test_mask],
+        ('user', 'own', 'repo'): own_eids[own_test_mask],
+        ('repo', 'owned-by', 'user'): own_eids[own_test_mask]
     })
 
     return train_sub_graph, valid_sub_graph, test_sub_graph
