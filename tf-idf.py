@@ -90,14 +90,15 @@ def get_user_repo_ratings(rating_matrix, read_me_tfidf, source_code_tfidf):
     alpha = 0.5
     beta = 0.5
     repo_sim = alpha * repo_read_me_similarity + beta * repo_source_code_similarity
+    repo_sim = repo_sim.toarray()
     top_k = 2
-    user_repo_ratings = np.array((users_count, repos_count))
+    user_repo_ratings = np.zeros((users_count, repos_count))
     for i in range(users_count):
         for j in range(repos_count):
             sim_repos = repo_sim[j][rating_matrix[i] > 0]
             top_k_sim_repos = sim_repos.argsort()[-top_k:]
             top_k_up = rating_matrix[i][top_k_sim_repos]
-            top_k_sim = sim_repos[j][top_k_sim_repos]
+            top_k_sim = sim_repos[top_k_sim_repos]
             user_repo_ratings[i, j] = np.dot(top_k_up, top_k_sim)
     return user_repo_ratings
 
