@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import pickle
+import time
 from KGCN import Model, loss_fn
 
 def process_graph(graph: dgl.heterograph):
@@ -226,4 +226,8 @@ def train():
             print()
 
 if __name__ == '__main__':
+    t0 = time.time()
     train()
+    t1 = time.time()
+    running_time = t1 -t0
+    print('running time: {:.3f}s'.format(running_time))
