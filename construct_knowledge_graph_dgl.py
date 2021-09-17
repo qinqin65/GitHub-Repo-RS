@@ -14,46 +14,57 @@ class convert_to_vec:
         self.min_count = 1
         self.epochs = 40
         self.doc_to_vec_model = gensim.models.doc2vec.Doc2Vec(vector_size=self.vector_size, min_count=self.min_count, epochs=self.epochs)
-        self.train_corpus = self.get_corpus()
+        self.train_corpus = self.my_corpus(all_users, all_repos)
         self.doc_to_vec_model.build_vocab(self.train_corpus)
         self.doc_to_vec_model.train(self.train_corpus, total_examples=self.doc_to_vec_model.corpus_count, epochs=self.doc_to_vec_model.epochs)
 
-    def get_sentences(self):
-        sentences = set()
-        for user in self.all_users:
-            if user['company'] is not None:
-                sentences.add(user['company'])
-            if user['location'] is not None:
-                sentences.add(user['location'])
-            if user['bio'] is not None:
-                sentences.add(user['bio'])
+    class my_corpus():
+        def __init__(self, all_users, all_repos) -> None:
+            self.all_users = all_users
+            self.all_repos = all_repos
+
+        def __iter__(self):
+            self.index = 0
+            for user in self.all_users:
+                if user['company'] is not None:
+                    yield self.simple_process(user['company'])
+                if user['location'] is not None:
+                    yield self.simple_process(user['location'])
+                if user['bio'] is not None:
+                    yield self.simple_process(user['bio'])
         
-        for repo in self.all_repos:
-            if repo['name'] is not None:
-                sentences.add(repo['name'])
-            if repo['full_name'] is not None:
-                sentences.add(repo['full_name'])
-            if repo['description'] is not None:
-                sentences.add(repo['description'])
-            if repo['language'] is not None:
-                sentences.add(repo['language'])
-            if repo['license'] is not None and repo['license']['name'] is not None:
-                sentences.add(repo['license']['name'])
-
-        return sentences
-
-    def get_corpus(self):
-        corpus = []
-        sentences = self.get_sentences()
-        for i, sentence in enumerate(sentences):
+            for repo in self.all_repos:
+                if repo['name'] is not None:
+                    yield self.simple_process(repo['name'])
+                if repo['full_name'] is not None:
+                    yield self.simple_process(repo['full_name'])
+                if repo['description'] is not None:
+                    yield self.simple_process(repo['description'])
+                if repo['language'] is not None:
+                    yield self.simple_process(repo['language'])
+                if repo['license'] is not None and repo['license']['name'] is not None:
+                    yield self.simple_process(repo['license']['name'])
+                if repo['read_me'] is not None:
+                    yield self.simple_process(get_dict_content(repo['read_me']))
+                if repo['source_code'] is not None:
+                    yield self.simple_process(get_dict_content(repo['source_code']))
+        
+        def simple_process(self, sentence):
             tokens = gensim.utils.simple_preprocess(sentence)
-            taggedDoc = gensim.models.doc2vec.TaggedDocument(tokens, [i])
-            corpus.append(taggedDoc)
-        return corpus
+            taggedDoc = gensim.models.doc2vec.TaggedDocument(tokens, [self.index])
+            self.index += 1
+            return taggedDoc
     
     def infer_vector(self, sentence):
         vector = self.doc_to_vec_model.infer_vector(sentence)
         return vector
+
+def get_dict_content(dict_files):
+    read_me_corpus = ''
+    if dict_files is not None:
+        for file_name, file_content in dict_files.items():
+            read_me_corpus += file_content
+    return dict_files
 
 def construct_knowledge_graph():
     users_count = users.count_documents({})
@@ -89,7 +100,7 @@ def construct_knowledge_graph():
     # graph data
     graph_data = {
         'user': torch.zeros([users_count, 150], dtype=torch.float32, device=device), # 3 vectors with size 50
-        'repo': torch.zeros([repos_count, 261], dtype=torch.float32, device=device) # 5 vectors with size 50 + 6 number property + 5 boolean property
+        'repo': torch.zeros([repos_count, 361], dtype=torch.float32, device=device) # 7 vectors with size 50 + 6 number property + 5 boolean property
     }
 
     # train a doc2vec model
@@ -123,6 +134,8 @@ def construct_knowledge_graph():
                 full_name = model.infer_vector(gensim.utils.simple_preprocess(repo['full_name'] or ''))
                 description = model.infer_vector(gensim.utils.simple_preprocess(repo['description'] or ''))
                 language = model.infer_vector(gensim.utils.simple_preprocess(repo['language'] or ''))
+                read_me = model.infer_vector(gensim.utils.simple_preprocess(get_dict_content(repo['read_me'])))
+                source_code = model.infer_vector(gensim.utils.simple_preprocess(get_dict_content(repo['source_code'])))
                 license = model.infer_vector(gensim.utils.simple_preprocess((repo['license'] and repo['license']['name']) or ''))
                 size = repo['size']
                 stargazers_count = repo['stargazers_count']
@@ -140,18 +153,20 @@ def construct_knowledge_graph():
                 graph_data['repo'][repos_id_map[repo['_id']], vector_size:vector_size*2] = torch.from_numpy(full_name)
                 graph_data['repo'][repos_id_map[repo['_id']], vector_size*2:vector_size*3] = torch.from_numpy(description)
                 graph_data['repo'][repos_id_map[repo['_id']], vector_size*3:vector_size*4] = torch.from_numpy(language)
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*4:vector_size*5] = torch.from_numpy(license)
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+1] = size
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+2] = stargazers_count
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+3] = watchers_count
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+4] = forks_count
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+5] = open_issues
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+6] = subscribers_count
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+7] = has_issues
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+8] = has_projects
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+9] = has_downloads
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+10] = has_wiki
-                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*5+11] = has_pages
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*4:vector_size*5] = torch.from_numpy(read_me)
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*5:vector_size*6] = torch.from_numpy(source_code)
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*6:vector_size*7] = torch.from_numpy(license)
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7:vector_size*7+1] = size
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+1:vector_size*7+2] = stargazers_count
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+2:vector_size*7+3] = watchers_count
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+3:vector_size*7+4] = forks_count
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+4:vector_size*7+5] = open_issues
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+5:vector_size*7+6] = subscribers_count
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+6:vector_size*7+7] = has_issues
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+7:vector_size*7+8] = has_projects
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+8:vector_size*7+9] = has_downloads
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+9:vector_size*7+10] = has_wiki
+                graph_data['repo'][repos_id_map[repo['_id']], vector_size*7+10:vector_size*7+11] = has_pages
 
             current_repo_id = repos_id_map[repo['_id']]
 
