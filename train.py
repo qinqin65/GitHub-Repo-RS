@@ -10,6 +10,7 @@ def process_graph(graph: dgl.heterograph):
     number_of_users = graph.num_nodes('user')
     number_of_repos = graph.num_nodes('repo')
     ground_truth = torch.zeros((number_of_users, number_of_repos), dtype=torch.int8)
+    user_repo = torch.zeros((number_of_users, number_of_repos), dtype=torch.int8)
     for etype in graph.canonical_etypes:
         # ignore the reverse relation
         if etype[0] != 'user' and etype[1] != 'repo':
@@ -30,8 +31,11 @@ def process_graph(graph: dgl.heterograph):
         graph.remove_edges(edge_ids[test_mask], etype=etype)
 
         ground_truth[edges[0][test_mask], edges[1][test_mask]] = 1
+        user_repo[edges[0], edges[1]] = 1
     
-    return graph, ground_truth
+    repos_per_user = torch.sum(user_repo, axis=1)
+
+    return graph, ground_truth, repos_per_user.numpy()
 
 def train():
     EPOCH = 100
@@ -65,8 +69,8 @@ def train():
     negative_sampler=dgl.dataloading.negative_sampler.Uniform(neg_sample_size),
     batch_size=1024, shuffle=True, drop_last=False)
 
-    processed_valid_graph, ground_truth_valid_data = process_graph(valid_graph)
-    processed_test_graph, ground_truth_test_data = process_graph(test_graph)
+    processed_valid_graph, ground_truth_valid_data, repos_per_user_valid = process_graph(valid_graph)
+    processed_test_graph, ground_truth_test_data, repos_per_user_test = process_graph(test_graph)
 
     for epoch in range(EPOCH):
         training_loops = 0
@@ -91,9 +95,17 @@ def train():
         if epoch % 5 == 0:
             # valid top k recommendation
             valid_mean_hit_rate = 0
+            valid_group_0_5_hit_rate = 0
+            valid_group_5_10_hit_rate = 0
+            valid_group_10_15_hit_rate = 0
+            valid_group_15_over_hit_rate = 0
             model.eval()
             with torch.no_grad():
                 hit_rates = np.zeros(valid_graph.num_nodes('user'))
+                group_0_5 = []
+                group_5_10 = []
+                group_10_15 = []
+                group_15_over = []
          
                 h_user = model.user_embedding(processed_valid_graph.ndata['graph_data']['user'])
                 h_repo = model.repo_embedding(processed_valid_graph.ndata['graph_data']['repo'])
@@ -122,15 +134,40 @@ def train():
                     ground_truth_set = set(ground_truth)
 
                     intersections = recommendation_set.intersection(ground_truth_set)
-                    hit_rate = 0 if len(ground_truth_set) == 0 else len(intersections) / min(len(ground_truth_set), TOP_K)
+                    number_of_intersections = len(intersections)
+                    number_of_ground_truth = len(ground_truth_set)
+                    hit_rate = 0 if number_of_ground_truth == 0 else number_of_intersections / min(number_of_ground_truth, TOP_K)
                     hit_rates[i] = min(hit_rate, 1)
+
+                    # grouping
+                    if repos_per_user_valid[i] < 5:
+                        group_0_5.append(i)
+                    elif repos_per_user_valid[i] < 10:
+                        group_5_10.append(i)
+                    elif repos_per_user_valid[i] < 15:
+                        group_10_15.append(i)
+                    else:
+                        group_15_over.append(i)
+
                 valid_mean_hit_rate = np.mean(hit_rates)
+                valid_group_0_5_hit_rate = np.mean(hit_rates[group_0_5])
+                valid_group_5_10_hit_rate = np.mean(hit_rates[group_5_10])
+                valid_group_10_15_hit_rate = np.mean(hit_rates[group_10_15])
+                valid_group_15_over_hit_rate = np.mean(hit_rates[group_15_over])
             
             # test top k recommendation
             test_mean_hit_rate = 0
+            test_group_0_5_hit_rate = 0
+            test_group_5_10_hit_rate = 0
+            test_group_10_15_hit_rate = 0
+            test_group_15_over_hit_rate = 0
             model.eval()
             with torch.no_grad():
                 hit_rates = np.zeros(test_graph.num_nodes('user'))
+                group_0_5 = []
+                group_5_10 = []
+                group_10_15 = []
+                group_15_over = []
          
                 h_user = model.user_embedding(processed_test_graph.ndata['graph_data']['user'])
                 h_repo = model.repo_embedding(processed_test_graph.ndata['graph_data']['repo'])
@@ -161,10 +198,32 @@ def train():
                     intersections = recommendation_set.intersection(ground_truth_set)
                     hit_rate = 0 if len(ground_truth_set) == 0 else len(intersections) / min(len(ground_truth_set), TOP_K)
                     hit_rates[i] = min(hit_rate, 1)
+
+                    # grouping
+                    if repos_per_user_test[i] < 5:
+                        group_0_5.append(i)
+                    elif repos_per_user_test[i] < 10:
+                        group_5_10.append(i)
+                    elif repos_per_user_test[i] < 15:
+                        group_10_15.append(i)
+                    else:
+                        group_15_over.append(i)
+
                 test_mean_hit_rate = np.mean(hit_rates)
+                test_group_0_5_hit_rate = np.mean(hit_rates[group_0_5])
+                test_group_5_10_hit_rate = np.mean(hit_rates[group_5_10])
+                test_group_10_15_hit_rate = np.mean(hit_rates[group_10_15])
+                test_group_15_over_hit_rate = np.mean(hit_rates[group_15_over])
 
             print('In epoch {}, loss: {:.3f}, valid hit rate: {:.3f}, test hit rate: {:.3f}'.format(
                 epoch, train_avg_loss, valid_mean_hit_rate, test_mean_hit_rate))
+            print('Valid - Group 0 to 5: {:.3f}, Group 5 to 10: {:.3f}, Group 10 to 15: {:.3f}, Group 15 to 20: {:.3f}'.format(
+                valid_group_0_5_hit_rate, valid_group_5_10_hit_rate, valid_group_10_15_hit_rate, valid_group_15_over_hit_rate
+            ))
+            print('Test - Group 0 to 5: {:.3f}, Group 5 to 10: {:.3f}, Group 10 to 15: {:.3f}, Group 15 to 20: {:.3f}'.format(
+                test_group_0_5_hit_rate, test_group_5_10_hit_rate, test_group_10_15_hit_rate, test_group_15_over_hit_rate
+            ))
+            print()
 
 if __name__ == '__main__':
     train()
