@@ -60,11 +60,11 @@ class convert_to_vec:
         return vector
 
 def get_dict_content(dict_files):
-    read_me_corpus = ''
+    corpus = ''
     if dict_files is not None:
         for file_name, file_content in dict_files.items():
-            read_me_corpus += file_content
-    return dict_files
+            corpus += file_content
+    return corpus
 
 def construct_knowledge_graph():
     users_count = users.count_documents({})
