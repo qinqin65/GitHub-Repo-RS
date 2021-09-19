@@ -44,9 +44,9 @@ class convert_to_vec:
                     yield self.simple_process(repo['language'])
                 if repo['license'] is not None and repo['license']['name'] is not None:
                     yield self.simple_process(repo['license']['name'])
-                if repo['read_me'] is not None:
+                if 'read_me' in repo:
                     yield self.simple_process(get_dict_content(repo['read_me']))
-                if repo['source_code'] is not None:
+                if 'source_code' in repo:
                     yield self.simple_process(get_dict_content(repo['source_code']))
         
         def simple_process(self, sentence):
@@ -134,8 +134,8 @@ def construct_knowledge_graph():
                 full_name = model.infer_vector(gensim.utils.simple_preprocess(repo['full_name'] or ''))
                 description = model.infer_vector(gensim.utils.simple_preprocess(repo['description'] or ''))
                 language = model.infer_vector(gensim.utils.simple_preprocess(repo['language'] or ''))
-                read_me = model.infer_vector(gensim.utils.simple_preprocess(get_dict_content(repo['read_me'])))
-                source_code = model.infer_vector(gensim.utils.simple_preprocess(get_dict_content(repo['source_code'])))
+                read_me = model.infer_vector(gensim.utils.simple_preprocess(get_dict_content(repo['read_me']) if 'read_me' in repo else ''))
+                source_code = model.infer_vector(gensim.utils.simple_preprocess(get_dict_content(repo['source_code']) if 'source_code' in repo else ''))
                 license = model.infer_vector(gensim.utils.simple_preprocess((repo['license'] and repo['license']['name']) or ''))
                 size = repo['size']
                 stargazers_count = repo['stargazers_count']
