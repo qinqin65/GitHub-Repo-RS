@@ -30,21 +30,17 @@ class CosineSimilarity(nn.Module):
         return ratings
 
 class Model(nn.Module):
-    def __init__(self, g, in_feat_user, in_feat_repo, out_feats):
+    def __init__(self, g, in_feat_user, in_feat_repo, out_user_repo, out_hidden, out_feats):
         super(Model, self).__init__()
         self.aggregate = aggregate_sum
-        self.user_embedding = Embedding(in_feat_user, 125)
-        self.repo_embedding = Embedding(in_feat_repo, 125)
+        self.user_embedding = Embedding(in_feat_user, out_user_repo)
+        self.repo_embedding = Embedding(in_feat_repo, out_user_repo)
         self.hidden = dglnn.HeteroGraphConv(
-            { etype[1]: dglnn.GraphConv(125, 96) for etype in g.canonical_etypes },
+            { etype[1]: dglnn.GraphConv(out_user_repo, out_hidden) for etype in g.canonical_etypes },
             aggregate='sum')
         self.out = dglnn.HeteroGraphConv(
-            { etype[1]: dglnn.GraphConv(96, out_feats) for etype in g.canonical_etypes },
+            { etype[1]: dglnn.GraphConv(out_hidden, out_feats) for etype in g.canonical_etypes },
             aggregate='sum')
-        self.hidden_current_user = nn.Linear(125, 96)
-        self.hidden_current_repo = nn.Linear(125, 96)
-        self.out_current_user = nn.Linear(96, out_feats)
-        self.out_current_repo = nn.Linear(96, out_feats)
         self.predict = CosineSimilarity()
 
     def forward(self, blocks, pos_g, neg_g, user_feat, repo_feat):

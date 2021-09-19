@@ -40,14 +40,19 @@ def process_graph(graph: dgl.heterograph):
 def train():
     EPOCH = 100
     TOP_K = 10
-    neg_sample_size = 5
+    NEG_SAMPLE_SIZE = 5
+    USER_INPUT_SIZE = 150
+    REPO_INPUT_SIZE = 361
+    USER_REPO_OUTPUT_SIZE = 125
+    HIDDEN_OUTPUT_SIZE = 96
+    OUT_SIZE = 50
 
     g, l = dgl.load_graphs('./data/sub_kowledge_graph.bin')
     train_graph = g[0]
     valid_graph = g[1]
     test_graph = g[2]
     
-    model = Model(train_graph, 150, 261, 50)
+    model = Model(train_graph, USER_INPUT_SIZE, REPO_INPUT_SIZE, USER_REPO_OUTPUT_SIZE, HIDDEN_OUTPUT_SIZE, OUT_SIZE)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
@@ -66,7 +71,7 @@ def train():
                     'star': 'starred-by', 'starred-by': 'star',
                     'fork': 'forked-by', 'forked-by': 'fork',
                     'own': 'owned-by', 'owned-by': 'own'},
-    negative_sampler=dgl.dataloading.negative_sampler.Uniform(neg_sample_size),
+    negative_sampler=dgl.dataloading.negative_sampler.Uniform(NEG_SAMPLE_SIZE),
     batch_size=1024, shuffle=True, drop_last=False)
 
     processed_valid_graph, ground_truth_valid_data, repos_per_user_valid = process_graph(valid_graph)
@@ -80,7 +85,7 @@ def train():
             repo_feat = blocks[0].ndata['graph_data']['repo']
             model.train()
             pos_score, neg_score = model(blocks, pos_g, neg_g, user_feat, repo_feat)
-            loss = loss_fn(pos_score, neg_score, neg_sample_size)
+            loss = loss_fn(pos_score, neg_score, NEG_SAMPLE_SIZE)
 
             total_loss += loss.item()
             training_loops += 1
