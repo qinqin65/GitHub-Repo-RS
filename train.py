@@ -10,36 +10,32 @@ import pickle
 def process_graph(graph: dgl.heterograph):
     number_of_users = graph.num_nodes('user')
     number_of_repos = graph.num_nodes('repo')
+    interaction_matrix = np.ones((number_of_users, number_of_repos), dtype=np.int8)
+    interaction_matrix_reverse = np.ones((number_of_repos, number_of_users), dtype=np.int8)
+    edges = np.where(interaction_matrix>0)
+    edges_reverse = np.where(interaction_matrix_reverse>0)
     ground_truth = torch.zeros((number_of_users, number_of_repos), dtype=torch.int8)
-    trained_truth = torch.zeros((number_of_users, number_of_repos), dtype=torch.int8)
     user_repo = torch.zeros((number_of_users, number_of_repos), dtype=torch.int8)
-    graph_clone = graph.clone()
+    graph_edges = {}
+    num_nodes_dict = { 'user': number_of_users, 'repo': number_of_repos }
     for etype in graph.canonical_etypes:
         # ignore the reverse relation
         if etype[0] != 'user' and etype[1] != 'repo':
+            graph_edges[etype] = edges_reverse
             continue
-        # sample 40% for testing
-        number_of_edges = graph.number_of_edges(etype=etype)
-        train_number = round(number_of_edges * 0.6)
-        test_number = round(number_of_edges * 0.4)
-        sample_indexes = np.array([0] * train_number + [1] * test_number)
-        np.random.shuffle(sample_indexes)
 
-        train_mask = sample_indexes==0
-        test_mask = sample_indexes==1
-
+        graph_edges[etype] = edges
         edges = graph.edges(etype=etype)
-        edge_ids = graph.edge_ids(edges[0], edges[1], etype=etype)
 
-        graph_clone.remove_edges(edge_ids[test_mask], etype=etype)
-
-        trained_truth[edges[0][train_mask], edges[1][train_mask]] = 1
-        ground_truth[edges[0][test_mask], edges[1][test_mask]] = 1
+        ground_truth[edges[0], edges[1]] = 1
         user_repo[edges[0], edges[1]] = 1
     
     repos_per_user = torch.sum(user_repo, axis=1)
 
-    return graph_clone, ground_truth, trained_truth, repos_per_user.numpy()
+    new_graph = dgl.heterograph(graph_edges, num_nodes_dict=num_nodes_dict)
+    new_graph.ndata['graph_data'] = graph.ndata['graph_data']
+
+    return new_graph, ground_truth, repos_per_user.numpy()
 
 def train():
     EPOCH = 100
@@ -55,51 +51,38 @@ def train():
     train_graph = g[0]
     valid_graph = g[1]
     test_graph = g[2]
+    train_pos_g = g[3]
+    train_neg_g = g[4]
+    valid_pos_g = g[5]
+    valid_neg_g = g[6]
+    test_pos_g = g[7]
+    test_neg_g = g[8]
     interaction_matrix = pickle.load(open('data/interaction_matrix.p', 'rb'))
     
     model = Model(train_graph, USER_INPUT_SIZE, REPO_INPUT_SIZE, USER_REPO_OUTPUT_SIZE, HIDDEN_OUTPUT_SIZE, OUT_SIZE)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-    sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
-    edges_fork = train_graph.edges(etype=('user', 'fork', 'repo'))
-    edges_own = train_graph.edges(etype=('user', 'own', 'repo'))
-    edges_star = train_graph.edges(etype=('user', 'star', 'repo'))
-    edges_watch = train_graph.edges(etype=('user', 'watch', 'repo'))
-    train_eid = {('user', 'fork', 'repo'): train_graph.edge_ids(edges_fork[0], edges_fork[1], etype=('user', 'fork', 'repo')),
-        ('user', 'own', 'repo'): train_graph.edge_ids(edges_own[0], edges_own[1], etype=('user', 'own', 'repo')),
-        ('user', 'star', 'repo'): train_graph.edge_ids(edges_star[0], edges_star[1], etype=('user', 'star', 'repo')),
-        ('user', 'watch', 'repo'): train_graph.edge_ids(edges_watch[0], edges_watch[1], etype=('user', 'watch', 'repo'))}
-    dataloader = dgl.dataloading.EdgeDataLoader(
-    train_graph, train_eid, sampler,
-    exclude='reverse_types',
-    reverse_etypes={'watch': 'watched-by', 'watched-by': 'watch',
-                    'star': 'starred-by', 'starred-by': 'star',
-                    'fork': 'forked-by', 'forked-by': 'fork',
-                    'own': 'owned-by', 'owned-by': 'own'},
-    negative_sampler=dgl.dataloading.negative_sampler.Uniform(NEG_SAMPLE_SIZE),
-    batch_size=1024, shuffle=True, drop_last=False)
-
-    processed_train_graph, ground_truth_train_data, trained_truth_train_data, repos_per_user_train = process_graph(train_graph)
-    processed_valid_graph, ground_truth_valid_data, trained_truth_valid_data, repos_per_user_valid = process_graph(valid_graph)
-    processed_test_graph, ground_truth_test_data, trained_truth_test_data, repos_per_user_test = process_graph(test_graph)
+    processed_train_graph, ground_truth_train_data, repos_per_user_train = process_graph(train_graph)
+    processed_valid_graph, ground_truth_valid_data, repos_per_user_valid = process_graph(valid_graph)
+    processed_test_graph, ground_truth_test_data, repos_per_user_test = process_graph(test_graph)
 
     for epoch in range(EPOCH):
         training_loops = 0
         total_loss = 0
-        for input_nodes, pos_g, neg_g, blocks in dataloader:
-            user_feat = blocks[0].ndata['graph_data']['user']
-            repo_feat = blocks[0].ndata['graph_data']['repo']
-            model.train()
-            pos_score, neg_score = model(blocks, pos_g, neg_g, user_feat, repo_feat)
-            loss = loss_fn(pos_score, neg_score, NEG_SAMPLE_SIZE)
 
-            total_loss += loss.item()
-            training_loops += 1
+        user_feat = train_graph.ndata['graph_data']['user']
+        repo_feat = train_graph.ndata['graph_data']['repo']
+        model.train()
+        pos_score, neg_score = model(train_graph, train_pos_g, train_neg_g, user_feat, repo_feat)
+        loss = loss_fn(pos_score, neg_score, NEG_SAMPLE_SIZE)
 
-            # Backward
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        total_loss += loss.item()
+        training_loops += 1
+
+        # Backward
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
         train_avg_loss = total_loss / training_loops
 
@@ -127,7 +110,7 @@ def train():
                 user_repo_rating = user_emb_normalized @ repo_emb_normalized.T
                 hit_rates = np.zeros(train_graph.num_nodes('user'))
                 for i, rating in enumerate(user_repo_rating):
-                    recommendation = rating[trained_truth_train_data[i]<1].detach().numpy()
+                    recommendation = rating.detach().numpy()
                     recommendation = recommendation.argsort()[-TOP_K:]
                     ground_truth = np.where(ground_truth_train_data[i]>0)[0]
                     if len(ground_truth) < TOP_K:
@@ -177,7 +160,7 @@ def train():
 
                 user_repo_rating = user_emb_normalized @ repo_emb_normalized.T
                 for i, rating in enumerate(user_repo_rating):
-                    recommendation = rating[trained_truth_valid_data[i]<1].detach().numpy()
+                    recommendation = rating.detach().numpy()
                     recommendation = recommendation.argsort()[-TOP_K:]
                     ground_truth = np.where(ground_truth_valid_data[i]>0)[0]
                     if len(ground_truth) < TOP_K:
@@ -242,7 +225,7 @@ def train():
 
                 user_repo_rating = user_emb_normalized @ repo_emb_normalized.T
                 for i, rating in enumerate(user_repo_rating):
-                    recommendation = rating[trained_truth_test_data[i]<1].detach().numpy()
+                    recommendation = rating.detach().numpy()
                     recommendation = recommendation.argsort()[-TOP_K:]
                     ground_truth = np.where(ground_truth_test_data[i]>0)[0]
                     if len(ground_truth) < TOP_K:
