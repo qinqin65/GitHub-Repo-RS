@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import time
 from KGCN import Model, loss_fn
+from sklearn.metrics import roc_auc_score
 
 def process_graph(graph: dgl.heterograph):
     number_of_users = graph.num_nodes('user')
@@ -37,6 +38,26 @@ def process_edge_data(graph, edge_data):
         ratings[edges[0], edges[1]] = np.maximum(ratings[edges[0], edges[1]], data)
     
     return ratings
+
+def compute_auc(graph, pos_score, neg_score):
+    auc_scores = []
+    for etype in graph.canonical_etypes:
+        # ignore the reverse relation
+        if etype[0] != 'user' and etype[1] != 'repo':
+            continue
+        
+        pos_data = torch.squeeze(pos_score[etype])
+        neg_data = torch.squeeze(neg_score[etype])
+        
+        scores = torch.cat([pos_data, neg_data]).numpy()
+        labels = torch.cat(
+            [torch.ones(pos_data.shape[0]), torch.zeros(neg_data.shape[0])]).numpy()
+
+        auc_score = roc_auc_score(labels, scores)
+
+        auc_scores.append(auc_score)
+    
+    return np.mean(auc_scores)
 
 def train():
     EPOCH = 100
@@ -199,9 +220,29 @@ def train():
                 test_group_5_10_hit_rate = np.mean(hit_rates[group_5_10][hit_rates[group_5_10]>-1])
                 test_group_10_15_hit_rate = np.mean(hit_rates[group_10_15][hit_rates[group_10_15]>-1])
                 test_group_15_over_hit_rate = np.mean(hit_rates[group_15_over][hit_rates[group_15_over]>-1])
+            
+            # conpute the AUC score
+            auc_score = 0
+            model.eval()
+            with torch.no_grad():
+                h_user = model.user_embedding(train_graph.ndata['graph_data']['user'])
+                h_repo = model.repo_embedding(train_graph.ndata['graph_data']['repo'])
 
-            print('In epoch {}, loss: {:.3f}, valid hit rate: {:.3f}, test hit rate: {:.3f}'.format(
-                epoch, train_avg_loss, valid_mean_hit_rate, test_mean_hit_rate))
+                h_dict = {
+                    'user': h_user,
+                    'repo': h_repo
+                }
+
+                h = model.hidden(train_graph, h_dict)
+                out = model.out(train_graph, h)
+
+                pos_score = model.predict(test_pos_g, out)
+                neg_score = model.predict(test_neg_g, out)
+
+                auc_score = compute_auc(train_graph, pos_score, neg_score)
+
+            print('In epoch {}, loss: {:.3f}, auc: {:.3f}, valid hit rate: {:.3f}, test hit rate: {:.3f}'.format(
+                epoch, train_avg_loss, auc_score, valid_mean_hit_rate, test_mean_hit_rate))
             print('Valid - Group 0 to 5: {:.3f}, Group 5 to 10: {:.3f}, Group 10 to 15: {:.3f}, Group 15 to 20: {:.3f}'.format(
                 valid_group_0_5_hit_rate, valid_group_5_10_hit_rate, valid_group_10_15_hit_rate, valid_group_15_over_hit_rate
             ))
