@@ -43,7 +43,7 @@ class Model(nn.Module):
             aggregate='sum')
         self.predict = CosineSimilarity()
 
-    def forward(self, blocks, pos_g, neg_g, user_feat, repo_feat):
+    def forward(self, g, pos_g, neg_g, user_feat, repo_feat):
         h_user = self.user_embedding(user_feat)
         h_repo = self.repo_embedding(repo_feat)
         
@@ -52,9 +52,9 @@ class Model(nn.Module):
             'repo': h_repo
         }
 
-        h = self.hidden(blocks[0], h_dict)
+        h = self.hidden(g, h_dict)
         
-        out = self.out(blocks[1], h)
+        out = self.out(g, h)
         
         pos_score = self.predict(pos_g, out)
         neg_score = self.predict(neg_g, out)
@@ -74,7 +74,6 @@ def loss_fn(pos_score, neg_score, neg_sample_size):
     for etype in pos_score.keys():
         neg_score_tensor = neg_score[etype]
         pos_score_tensor = pos_score[etype]
-        neg_score_tensor = neg_score_tensor.reshape(-1, neg_sample_size)
         negative_mask_tensor = torch.zeros(size=neg_score_tensor.shape)
         scores = neg_score_tensor + delta - pos_score_tensor - negative_mask_tensor
         relu = nn.ReLU()
