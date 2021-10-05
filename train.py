@@ -136,16 +136,12 @@ def train():
                 user_repo_rating = process_edge_data(valid_graph, prediction)
 
                 for i, rating in enumerate(user_repo_rating):
-                    recommendation = rating
-                    recommendation = recommendation.argsort()[-TOP_K:]
+                    recommendation = rating.argsort()[-TOP_K:]
                     ground_truth = np.where(ground_truth_valid_data[i]>0)[0]
 
-                    recommendation_set = set(recommendation)
-                    ground_truth_set = set(ground_truth)
-
-                    intersections = recommendation_set.intersection(ground_truth_set)
+                    intersections = np.intersect1d(recommendation, ground_truth)
                     number_of_intersections = len(intersections)
-                    number_of_ground_truth = len(ground_truth_set)
+                    number_of_ground_truth = len(ground_truth)
                     hit_rate = -1 if number_of_ground_truth == 0 else number_of_intersections / min(number_of_ground_truth, TOP_K)
                     hit_rates[i] = min(hit_rate, 1)
 
@@ -194,16 +190,12 @@ def train():
                 user_repo_rating = process_edge_data(test_graph, prediction)
 
                 for i, rating in enumerate(user_repo_rating):
-                    recommendation = rating
-                    recommendation = recommendation.argsort()[-TOP_K:]
+                    recommendation = rating.argsort()[-TOP_K:]
                     ground_truth = np.where(ground_truth_test_data[i]>0)[0]
 
-                    recommendation_set = set(recommendation)
-                    ground_truth_set = set(ground_truth)
-
-                    intersections = recommendation_set.intersection(ground_truth_set)
-                    hit_rate = -1 if len(ground_truth_set) == 0 else len(intersections) / min(len(ground_truth_set), TOP_K)
-                    hit_rates[i] = min(hit_rate, 1)
+                    intersections = np.intersect1d(recommendation, ground_truth)
+                    hit_rate = -1 if len(ground_truth) == 0 else len(intersections) / min(len(ground_truth), TOP_K)
+                    hit_rates[i] = hit_rate
 
                     # grouping
                     if repos_per_user_test[i] < 5:
