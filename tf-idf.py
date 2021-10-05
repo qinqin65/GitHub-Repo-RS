@@ -87,18 +87,26 @@ def get_rating_matrix():
 def get_user_repo_ratings(rating_matrix, read_me_tfidf, source_code_tfidf):
     repo_read_me_similarity = read_me_tfidf @ read_me_tfidf.T
     repo_source_code_similarity = source_code_tfidf @ source_code_tfidf.T
-    alpha = 0.5
-    beta = 0.5
+    alpha = 0.9
+    beta = 0.1
     repo_sim = alpha * repo_read_me_similarity + beta * repo_source_code_similarity
     repo_sim = repo_sim.toarray()
     top_k = 2
     user_repo_ratings = np.zeros((users_count, repos_count))
     for i in range(users_count):
         for j in range(repos_count):
-            sim_repos = repo_sim[j][rating_matrix[i] > 0]
-            top_k_sim_repos = sim_repos.argsort()[-top_k:]
-            top_k_up = rating_matrix[i][top_k_sim_repos]
-            top_k_sim = sim_repos[top_k_sim_repos]
+            # eliminate the current repositories itslef
+            repo_sim[j][j] = 0
+            # the reposittories the user rated
+            user_repos = np.where(rating_matrix[i]>0)[0]
+            # the similarity of the user rated repositories
+            similarities = repo_sim[j][user_repos]
+            similarities_arg_sorted = similarities.argsort()
+            # select top k similarities
+            similarities_arg_sorted = similarities_arg_sorted[-top_k:]
+       
+            top_k_up = rating_matrix[i][user_repos[similarities_arg_sorted]]
+            top_k_sim = similarities[similarities_arg_sorted]
             user_repo_ratings[i, j] = np.dot(top_k_up, top_k_sim)
     return user_repo_ratings
 
@@ -126,22 +134,45 @@ def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
     user_repo_ratings = get_user_repo_ratings(rating_matrix, read_me_tfidf, source_code_tfidf)
     top_k = 10
     hit_rates = np.zeros(users_count)
+    group_0_5 = []
+    group_5_10 = []
+    group_10_15 = []
+    group_15_over = []
 
     for i, rating in enumerate(user_repo_ratings):
-        non_test_filter = test_data[i] == 0
-        rating[non_test_filter] == 0
         recommendation = rating.argsort()[-top_k:]
-        ground_truth = test_data[i].argsort()[-top_k:]
+        ground_truth = np.where(test_data[i]>0)[0]
 
-        recommendation_set = set(recommendation)
-        ground_truth_set = set(ground_truth)
-
-        intersections = recommendation_set.intersection(ground_truth)
-        hit_rate = 0 if len(ground_truth_set) == 0 else len(intersections) / min(len(ground_truth_set), top_k)
+        intersections = np.intersect1d(recommendation, ground_truth)
+        number_of_ground_truth = len(ground_truth)
+        number_of_intersections = len(intersections)
+        hit_rate = -1 if number_of_ground_truth == 0 else number_of_intersections / min(number_of_ground_truth, top_k)
         hit_rates[i] = hit_rate
     
-    mean_hit_rate = np.mean(hit_rates)
-    print('hit rate for top %s: %s' % (top_k, mean_hit_rate))
+        # grouping
+        repos_count = len(test_data[i][test_data[i]>0])
+        if repos_count < 5:
+            group_0_5.append(i)
+        elif repos_count < 10:
+            group_5_10.append(i)
+        elif repos_count < 15:
+            group_10_15.append(i)
+        else:
+            group_15_over.append(i)
+
+    mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
+    group_0_5_hit_rate = np.mean(hit_rates[group_0_5][hit_rates[group_0_5]>-1])
+    group_5_10_hit_rate = np.mean(hit_rates[group_5_10][hit_rates[group_5_10]>-1])
+    group_10_15_hit_rate = np.mean(hit_rates[group_10_15][hit_rates[group_10_15]>-1])
+    group_15_over_hit_rate = np.mean(hit_rates[group_15_over][hit_rates[group_15_over]>-1])
+    print('hit rate for top %s: %.3f, Group 0 to 5: %.3f, Group 5 to 10: %.3f, Group 10 to 15: %.3f, Group 15 to 20: %.3f' % (
+        top_k, 
+        mean_hit_rate,
+        group_0_5_hit_rate,
+        group_5_10_hit_rate,
+        group_10_15_hit_rate,
+        group_15_over_hit_rate
+    ))
 
 if __name__ == "__main__":
     if os.path.exists('./data/rating_matrix.p'):
