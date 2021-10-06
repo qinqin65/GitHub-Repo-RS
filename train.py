@@ -2,14 +2,17 @@ import dgl
 import torch
 import numpy as np
 import time
+import pickle
 from KGCN import Model, loss_fn
 from sklearn.metrics import roc_auc_score
+from util import Group
 
 def process_graph(graph: dgl.heterograph):
     number_of_users = graph.num_nodes('user')
     number_of_repos = graph.num_nodes('repo')
     ground_truth = torch.zeros((number_of_users, number_of_repos), dtype=torch.int8)
     user_repo = torch.zeros((number_of_users, number_of_repos), dtype=torch.int8)
+    interactions_map = pickle.load(open('./data/interactions_map.p', 'rb'))
     for etype in graph.canonical_etypes:
         # ignore the reverse relation
         if etype[0] != 'user' and etype[1] != 'repo':
@@ -17,7 +20,7 @@ def process_graph(graph: dgl.heterograph):
 
         edges = graph.edges(etype=etype)
 
-        ground_truth[edges[0], edges[1]] = 1
+        ground_truth[edges[0], edges[1]] = interactions_map[etype[1]] + 1
         user_repo[edges[0], edges[1]] = 1
     
     repos_per_user = torch.sum(user_repo, axis=1)
@@ -107,19 +110,20 @@ def train():
         train_avg_loss = total_loss / training_loops
 
         if epoch % 5 == 0:
-            # # valid top k recommendation
-            valid_mean_hit_rate = 0
-            valid_group_0_5_hit_rate = 0
-            valid_group_5_10_hit_rate = 0
-            valid_group_10_15_hit_rate = 0
-            valid_group_15_over_hit_rate = 0
+            # valid top k recommendation
             model.eval()
             with torch.no_grad():
+                # hit rate
+                valid_mean_hit_rate = 0
+                valid_group_hit_rate = {}
                 hit_rates = np.zeros(valid_graph.num_nodes('user'))
-                group_0_5 = []
-                group_5_10 = []
-                group_10_15 = []
-                group_15_over = []
+                hit_rate_groups = Group()
+
+                # MRR
+                valid_mrr = 0
+                valid_group_mrr = {}
+                mrr = np.zeros(valid_graph.num_nodes('user'))
+                mrr_group = Group()
          
                 h_user = model.user_embedding(train_graph.ndata['graph_data']['user'])
                 h_repo = model.repo_embedding(train_graph.ndata['graph_data']['repo'])
@@ -136,10 +140,14 @@ def train():
                 user_repo_rating = process_edge_data(valid_graph, prediction)
 
                 for i, rating in enumerate(user_repo_rating):
-                    recommendation = rating.argsort()[-TOP_K:]
-                    ground_truth = np.where(ground_truth_valid_data[i]>0)[0]
+                    recommendation = rating.argsort()[:TOP_K:-1]
+                    index_sorted = ground_truth_valid_data[i].argsort()
+                    filter_index = ground_truth_valid_data[i][index_sorted] > 0
+                    ground_truth = index_sorted[filter_index]
 
-                    intersections = np.intersect1d(recommendation, ground_truth)
+                    intersections, recommendation_index, ground_truth_index = np.intersect1d(recommendation, ground_truth, return_indices=True)
+
+                    # hit rate
                     number_of_intersections = len(intersections)
                     number_of_ground_truth = len(ground_truth)
                     hit_rate = -1 if number_of_ground_truth == 0 else number_of_intersections / min(number_of_ground_truth, TOP_K)
@@ -147,19 +155,17 @@ def train():
 
                     # grouping
                     if repos_per_user_valid[i] < 5:
-                        group_0_5.append(i)
+                        hit_rate_groups['0-5'].append(i)
                     elif repos_per_user_valid[i] < 10:
-                        group_5_10.append(i)
+                        hit_rate_groups['5-10'].append(i)
                     elif repos_per_user_valid[i] < 15:
-                        group_10_15.append(i)
+                        hit_rate_groups['10-15'].append(i)
                     else:
-                        group_15_over.append(i)
+                        hit_rate_groups['15-over'].append(i)
 
                 valid_mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
-                valid_group_0_5_hit_rate = np.mean(hit_rates[group_0_5][hit_rates[group_0_5]>-1])
-                valid_group_5_10_hit_rate = np.mean(hit_rates[group_5_10][hit_rates[group_5_10]>-1])
-                valid_group_10_15_hit_rate = np.mean(hit_rates[group_10_15][hit_rates[group_10_15]>-1])
-                valid_group_15_over_hit_rate = np.mean(hit_rates[group_15_over][hit_rates[group_15_over]>-1])
+                for group_name, group_indices in hit_rate_groups.items():
+                    valid_group_hit_rate[group_name] = np.mean(hit_rates[group_indices][hit_rates[group_indices]>-1])
             
             # # test top k recommendation
             test_mean_hit_rate = 0
