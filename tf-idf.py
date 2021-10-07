@@ -1,16 +1,10 @@
 import config as cfg
-import requests
-import logging
-import re
-from logging.handlers import RotatingFileHandler
-import pandas as pd
 import numpy as np
 import pickle
 import os
-from lang_ext_mapping import lang_ext_mapping
 from db_manager import users, repositories, close
-from data_collection import get_json_from_url, check_rate_limit, logger
 from sklearn.feature_extraction.text import TfidfVectorizer
+from util import Group
 
 headers = {'Authorization': 'token %s' % cfg.oauth_token}
 
@@ -110,6 +104,71 @@ def get_user_repo_ratings(rating_matrix, read_me_tfidf, source_code_tfidf):
             user_repo_ratings[i, j] = np.dot(top_k_up, top_k_sim)
     return user_repo_ratings
 
+def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
+    users_count = rating_matrix.shape[0]
+    # hit rate
+    hit_rates = np.zeros(users_count)
+    group_hit_rate = {}
+    hit_rate_groups = Group()
+
+    # MRR
+    mrr = np.zeros(users_count)
+    group_mrr = {}
+    mrr_groups = Group()
+
+    for i, rating in enumerate(user_repo_ratings):
+        recommendation = rating.argsort()[::-1][:top_k]
+        index_argsorted = test_data[i].argsort()
+        filter_index = test_data[i][index_argsorted] > 0
+        ground_truth = index_argsorted[filter_index]
+
+        intersections, recommendation_index, ground_truth_index = np.intersect1d(recommendation, ground_truth, return_indices=True)
+        number_of_ground_truth = len(ground_truth)
+        number_of_intersections = len(intersections)
+
+        # hit rate
+        hit_rate = -1 if number_of_ground_truth == 0 else number_of_intersections / min(number_of_ground_truth, top_k)
+        hit_rates[i] = hit_rate
+
+        # MRR
+        if number_of_intersections > 0:
+            if recommendation_index[0] <= top_k:
+                mrr[i] = 1 / (recommendation_index[0] + 1)
+        else:
+            mrr[i] == -1
+    
+        # grouping
+        repos_count = len(test_data[i][test_data[i]>0])
+        if repos_count < 5:
+            hit_rate_groups['0-5'].append(i)
+            mrr_groups['0-5'].append(i)
+        elif repos_count < 10:
+            hit_rate_groups['5-10'].append(i)
+            mrr_groups['5-10'].append(i)
+        elif repos_count < 15:
+            hit_rate_groups['10-15'].append(i)
+            mrr_groups['10-15'].append(i)
+        else:
+            hit_rate_groups['15-over'].append(i)
+            mrr_groups['15-over'].append(i)
+
+    # hit rate mean
+    mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
+    for group_name, group_indices in hit_rate_groups.items():
+        group_hit_rate[group_name] = np.mean(hit_rates[group_indices][hit_rates[group_indices]>-1])
+
+    # mrr mean
+    mean_mrr = np.mean(mrr[mrr>-1])
+    for group_name, group_indices in mrr_groups.items():
+        group_mrr[group_name] = np.mean(mrr[group_indices][mrr[group_indices]>-1])
+
+    return (
+        mean_hit_rate,
+        mean_mrr,
+        group_hit_rate,
+        group_mrr
+    )
+
 def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
     test_data = np.zeros(rating_matrix.shape)
 
@@ -132,47 +191,39 @@ def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
         interaction[up_index[test_mask]] = 0
     
     user_repo_ratings = get_user_repo_ratings(rating_matrix, read_me_tfidf, source_code_tfidf)
-    top_k = 10
-    hit_rates = np.zeros(users_count)
-    group_0_5 = []
-    group_5_10 = []
-    group_10_15 = []
-    group_15_over = []
+    top_k = [10, 15, 20]
+    training_results = []
+    result_title_str = 'top %s, hit rate: %.3f, MRR: %.3f'
+    group_title_str = ''
 
-    for i, rating in enumerate(user_repo_ratings):
-        recommendation = rating.argsort()[-top_k:]
-        ground_truth = np.where(test_data[i]>0)[0]
+    for k in top_k:
+        (
+            mean_hit_rate,
+            mean_mrr,
+            group_hit_rate,
+            group_mrr
+        ) = top_k_evaluate(k, rating_matrix, user_repo_ratings, test_data)
 
-        intersections = np.intersect1d(recommendation, ground_truth)
-        number_of_ground_truth = len(ground_truth)
-        number_of_intersections = len(intersections)
-        hit_rate = -1 if number_of_ground_truth == 0 else number_of_intersections / min(number_of_ground_truth, top_k)
-        hit_rates[i] = hit_rate
-    
-        # grouping
-        repos_count = len(test_data[i][test_data[i]>0])
-        if repos_count < 5:
-            group_0_5.append(i)
-        elif repos_count < 10:
-            group_5_10.append(i)
-        elif repos_count < 15:
-            group_10_15.append(i)
-        else:
-            group_15_over.append(i)
+        result = [
+            k,
+            mean_hit_rate,
+            mean_mrr
+        ]
 
-    mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
-    group_0_5_hit_rate = np.mean(hit_rates[group_0_5][hit_rates[group_0_5]>-1])
-    group_5_10_hit_rate = np.mean(hit_rates[group_5_10][hit_rates[group_5_10]>-1])
-    group_10_15_hit_rate = np.mean(hit_rates[group_10_15][hit_rates[group_10_15]>-1])
-    group_15_over_hit_rate = np.mean(hit_rates[group_15_over][hit_rates[group_15_over]>-1])
-    print('hit rate for top %s: %.3f, Group 0 to 5: %.3f, Group 5 to 10: %.3f, Group 10 to 15: %.3f, Group 15 to 20: %.3f' % (
-        top_k, 
-        mean_hit_rate,
-        group_0_5_hit_rate,
-        group_5_10_hit_rate,
-        group_10_15_hit_rate,
-        group_15_over_hit_rate
-    ))
+        for name, value in group_hit_rate.items():
+            result.append(value)
+            if k == top_k[0]:
+                group_title_str += ', Hit rate group ' + name + ': %.3f'
+
+        for name, value in group_mrr.items():
+            result.append(value)
+            if k == top_k[0]:
+                group_title_str += ', MRR group ' + name + ': %.3f'
+
+        training_results.append(result)
+
+    for result in training_results:
+        print((result_title_str + group_title_str) % tuple(result))
 
 if __name__ == "__main__":
     if os.path.exists('./data/rating_matrix.p'):
