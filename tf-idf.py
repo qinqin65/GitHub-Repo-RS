@@ -118,7 +118,7 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
 
     for i, rating in enumerate(user_repo_ratings):
         recommendation = rating.argsort()[::-1][:top_k]
-        index_argsorted = test_data[i].argsort()
+        index_argsorted = test_data[i].argsort()[::-1]
         filter_index = test_data[i][index_argsorted] > 0
         ground_truth = index_argsorted[filter_index]
 

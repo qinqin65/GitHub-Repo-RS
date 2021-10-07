@@ -141,7 +141,7 @@ def train():
 
                 for i, rating in enumerate(user_repo_rating):
                     recommendation = rating.argsort()[::-1][:TOP_K]
-                    index_sorted = ground_truth_valid_data[i].argsort()
+                    index_sorted = ground_truth_valid_data[i].argsort(descending=True)
                     filter_index = ground_truth_valid_data[i][index_sorted] > 0
                     ground_truth = index_sorted[filter_index]
 
@@ -215,7 +215,7 @@ def train():
 
                 for i, rating in enumerate(user_repo_rating):
                     recommendation = rating.argsort()[::-1][:TOP_K]
-                    index_sorted = ground_truth_test_data[i].argsort()
+                    index_sorted = ground_truth_test_data[i].argsort(descending=True)
                     filter_index = ground_truth_test_data[i][index_sorted] > 0
                     ground_truth = index_sorted[filter_index]
 
