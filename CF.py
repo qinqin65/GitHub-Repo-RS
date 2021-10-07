@@ -1,6 +1,7 @@
 """ A collaborate filtering baseline model """
 import pickle
 import numpy as np
+from util import Group
 
 def similar(interaction_matrix):
     sim_user_u_v = interaction_matrix @ interaction_matrix.T
@@ -21,43 +22,67 @@ def recommend(interaction_matrix, interaction_count):
 
 def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
     users_count = rating_matrix.shape[0]
+    # hit rate
     hit_rates = np.zeros(users_count)
-    group_0_5 = []
-    group_5_10 = []
-    group_10_15 = []
-    group_15_over = []
+    group_hit_rate = {}
+    hit_rate_groups = Group()
+
+    # MRR
+    mrr = np.zeros(users_count)
+    group_mrr = {}
+    mrr_groups = Group()
 
     for i, rating in enumerate(user_repo_ratings):
         recommendation = rating[-top_k:]
-        ground_truth = np.where(test_data[i]>0)[0]
+        index_argsorted = test_data[i].argsort()
+        filter_index = test_data[i][index_argsorted] > 0
+        ground_truth = index_argsorted[filter_index]
 
-        intersections = np.intersect1d(recommendation, ground_truth)
-        hit_rate = -1 if len(ground_truth) == 0 else len(intersections) / min(len(ground_truth), top_k)
+        intersections, recommendation_index, ground_truth_index = np.intersect1d(recommendation, ground_truth, return_indices=True)
+        number_of_ground_truth = len(ground_truth)
+        number_of_intersections = len(intersections)
+
+        # hit rate
+        hit_rate = -1 if number_of_ground_truth == 0 else number_of_intersections / min(number_of_ground_truth, top_k)
         hit_rates[i] = hit_rate
+
+        # MRR
+        if number_of_intersections > 0:
+            if recommendation_index[0] <= top_k:
+                mrr[i] = 1 / (recommendation_index[0] + 1)
+        else:
+            mrr[i] == -1
 
         # grouping
         repos_count = len(test_data[i][test_data[i]>0])
         if repos_count < 5:
-            group_0_5.append(i)
+            hit_rate_groups['0-5'].append(i)
+            mrr_groups['0-5'].append(i)
         elif repos_count < 10:
-            group_5_10.append(i)
+            hit_rate_groups['5-10'].append(i)
+            mrr_groups['5-10'].append(i)
         elif repos_count < 15:
-            group_10_15.append(i)
+            hit_rate_groups['10-15'].append(i)
+            mrr_groups['10-15'].append(i)
         else:
-            group_15_over.append(i)
+            hit_rate_groups['15-over'].append(i)
+            mrr_groups['15-over'].append(i)
     
+    # hit rate mean
     mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
-    group_0_5_hit_rate = np.mean(hit_rates[group_0_5][hit_rates[group_0_5]>-1])
-    group_5_10_hit_rate = np.mean(hit_rates[group_5_10][hit_rates[group_5_10]>-1])
-    group_10_15_hit_rate = np.mean(hit_rates[group_10_15][hit_rates[group_10_15]>-1])
-    group_15_over_hit_rate = np.mean(hit_rates[group_15_over][hit_rates[group_15_over]>-1])
+    for group_name, group_indices in hit_rate_groups.items():
+        group_hit_rate[group_name] = np.mean(hit_rates[group_indices][hit_rates[group_indices]>-1])
+
+    # mrr mean
+    mean_mrr = np.mean(mrr[mrr>-1])
+    for group_name, group_indices in mrr_groups.items():
+        group_mrr[group_name] = np.mean(mrr[group_indices][mrr[group_indices]>-1])
 
     return (
         mean_hit_rate,
-        group_0_5_hit_rate,
-        group_5_10_hit_rate,
-        group_10_15_hit_rate,
-        group_15_over_hit_rate
+        mean_mrr,
+        group_hit_rate,
+        group_mrr
     )
 
 def evaluate(rating_matrix):
@@ -86,34 +111,37 @@ def evaluate(rating_matrix):
     user_repo_ratings = recommend(rating_matrix, interaction_count)
     top_k = [10, 15, 20]
     training_results = []
+    result_title_str = 'top %s, hit rate: %.3f, MRR: %.3f'
+    group_title_str = ''
 
     for k in top_k:
         (
             mean_hit_rate,
-            group_0_5_hit_rate,
-            group_5_10_hit_rate,
-            group_10_15_hit_rate,
-            group_15_over_hit_rate
+            mean_mrr,
+            group_hit_rate,
+            group_mrr
         ) = top_k_evaluate(k, rating_matrix, user_repo_ratings, test_data)
 
-        training_results.append([
-            k, 
+        result = [
+            k,
             mean_hit_rate,
-            group_0_5_hit_rate,
-            group_5_10_hit_rate,
-            group_10_15_hit_rate,
-            group_15_over_hit_rate
-        ])
+            mean_mrr
+        ]
+
+        for name, value in group_hit_rate.items():
+            result.append(value)
+            if k == top_k[0]:
+                group_title_str += ', Hit rate group ' + name + ': %.3f'
+
+        for name, value in group_mrr.items():
+            result.append(value)
+            if k == top_k[0]:
+                group_title_str += ', MRR group ' + name + ': %.3f'
+
+        training_results.append(result)
 
     for result in training_results:
-        print('hit rate for top %s: %.3f, Group 0 to 5: %.3f, Group 5 to 10: %.3f, Group 10 to 15: %.3f, Group 15 to 20: %.3f' % (
-            result[0], 
-            result[1],
-            result[2],
-            result[3],
-            result[4],
-            result[5]
-        ))
+        print((result_title_str + group_title_str) % tuple(result))
 
 if __name__ == "__main__":
     interaction_matrix = pickle.load(open('./data/interaction_matrix.p', 'rb'))
