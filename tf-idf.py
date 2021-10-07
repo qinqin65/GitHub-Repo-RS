@@ -134,7 +134,7 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
         if number_of_intersections > 0:
             if recommendation_index[0] <= top_k:
                 mrr[i] = 1 / (recommendation_index[0] + 1)
-        else:
+        elif number_of_ground_truth == 0:
             mrr[i] == -1
     
         # grouping

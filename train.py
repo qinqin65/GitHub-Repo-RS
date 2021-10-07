@@ -157,7 +157,7 @@ def train():
                     if number_of_intersections > 0:
                         if recommendation_index[0] <= TOP_K:
                             mrr[i] = 1 / (recommendation_index[0] + 1)
-                    else:
+                    elif number_of_ground_truth == 0:
                         mrr[i] == -1
 
                     # grouping
@@ -231,7 +231,7 @@ def train():
                     if number_of_intersections > 0:
                         if recommendation_index[0] <= TOP_K:
                             mrr[i] = 1 / (recommendation_index[0] + 1)
-                    else:
+                    elif number_of_ground_truth == 0:
                         mrr[i] == -1
 
                     # grouping
