@@ -124,6 +124,12 @@ def train():
                 valid_group_mrr = {}
                 mrr = np.zeros(valid_graph.num_nodes('user'))
                 mrr_groups = Group()
+
+                # nDCG
+                valid_ndcg = 0
+                valid_group_ndcg = {}
+                ndcg = np.zeros(valid_graph.num_nodes('user'))
+                ndcg_groups = Group()
          
                 h_user = model.user_embedding(train_graph.ndata['graph_data']['user'])
                 h_repo = model.repo_embedding(train_graph.ndata['graph_data']['repo'])
@@ -159,20 +165,38 @@ def train():
                             mrr[i] = 1 / (recommendation_index[0] + 1)
                     elif number_of_ground_truth == 0:
                         mrr[i] == -1
+                    
+                    # nDCG
+                    if number_of_ground_truth == 0:
+                        ndcg[i] = -1
+                    else:
+                        relevance_score = ground_truth_valid_data[i].numpy()[recommendation][:min(number_of_ground_truth, TOP_K)]
+                        relevance_score_idea = ground_truth_valid_data[i][ground_truth].numpy()[:min(number_of_ground_truth, TOP_K)]
+                        pow_rel = np.power(2, relevance_score) - 1
+                        pow_rel_idea = np.power(2, relevance_score_idea) - 1
+                        ranks = np.arange(start=1, stop=len(relevance_score) + 1)
+                        log_rank = np.log2(ranks + 1)
+                        dcg = np.sum(pow_rel / log_rank)
+                        idcg = np.sum(pow_rel_idea / log_rank)
+                        ndcg[i] = dcg / idcg
 
                     # grouping
                     if repos_per_user_valid[i] < 5:
                         hit_rate_groups['0-5'].append(i)
                         mrr_groups['0-5'].append(i)
+                        ndcg_groups['0-5'].append(i)
                     elif repos_per_user_valid[i] < 10:
                         hit_rate_groups['5-10'].append(i)
                         mrr_groups['5-10'].append(i)
+                        ndcg_groups['5-10'].append(i)
                     elif repos_per_user_valid[i] < 15:
                         hit_rate_groups['10-15'].append(i)
                         mrr_groups['10-15'].append(i)
+                        ndcg_groups['10-15'].append(i)
                     else:
                         hit_rate_groups['15-over'].append(i)
                         mrr_groups['15-over'].append(i)
+                        ndcg_groups['15-over'].append(i)
 
                 # hit rate mean
                 valid_mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
@@ -183,6 +207,11 @@ def train():
                 valid_mrr = np.mean(mrr[mrr>-1])
                 for group_name, group_indices in mrr_groups.items():
                     valid_group_mrr[group_name] = np.mean(mrr[group_indices][mrr[group_indices]>-1])
+                
+                # nDCG mean
+                valid_ndcg = np.mean(ndcg[ndcg>-1])
+                for group_name, group_indices in ndcg_groups.items():
+                    valid_group_ndcg[group_name] = np.mean(ndcg[group_indices][ndcg[group_indices]>-1])
             
             # test top k recommendation
             model.eval()
@@ -198,6 +227,12 @@ def train():
                 test_group_mrr = {}
                 mrr = np.zeros(test_graph.num_nodes('user'))
                 mrr_groups = Group()
+
+                # nDCG
+                test_ndcg = 0
+                test_group_ndcg = {}
+                ndcg = np.zeros(test_graph.num_nodes('user'))
+                ndcg_groups = Group()
          
                 h_user = model.user_embedding(train_graph.ndata['graph_data']['user'])
                 h_repo = model.repo_embedding(train_graph.ndata['graph_data']['repo'])
@@ -234,19 +269,37 @@ def train():
                     elif number_of_ground_truth == 0:
                         mrr[i] == -1
 
+                    # nDCG
+                    if number_of_ground_truth == 0:
+                        ndcg[i] = -1
+                    else:
+                        relevance_score = ground_truth_test_data[i].numpy()[recommendation][:min(number_of_ground_truth, TOP_K)]
+                        relevance_score_idea = ground_truth_test_data[i][ground_truth].numpy()[:min(number_of_ground_truth, TOP_K)]
+                        pow_rel = np.power(2, relevance_score) - 1
+                        pow_rel_idea = np.power(2, relevance_score_idea) - 1
+                        ranks = np.arange(start=1, stop=len(relevance_score) + 1)
+                        log_rank = np.log2(ranks + 1)
+                        dcg = np.sum(pow_rel / log_rank)
+                        idcg = np.sum(pow_rel_idea / log_rank)
+                        ndcg[i] = dcg / idcg
+
                     # grouping
                     if repos_per_user_test[i] < 5:
                         hit_rate_groups['0-5'].append(i)
                         mrr_groups['0-5'].append(i)
+                        ndcg_groups['0-5'].append(i)
                     elif repos_per_user_test[i] < 10:
                         hit_rate_groups['5-10'].append(i)
                         mrr_groups['5-10'].append(i)
+                        ndcg_groups['5-10'].append(i)
                     elif repos_per_user_test[i] < 15:
                         hit_rate_groups['10-15'].append(i)
                         mrr_groups['10-15'].append(i)
+                        ndcg_groups['10-15'].append(i)
                     else:
                         hit_rate_groups['15-over'].append(i)
                         mrr_groups['15-over'].append(i)
+                        ndcg_groups['15-over'].append(i)
 
                 # hit rate mean
                 test_mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
@@ -258,6 +311,11 @@ def train():
                 for group_name, group_indices in mrr_groups.items():
                     test_group_mrr[group_name] = np.mean(mrr[group_indices][mrr[group_indices]>-1])
             
+                # nDCG mean
+                test_ndcg = np.mean(ndcg[ndcg>-1])
+                for group_name, group_indices in ndcg_groups.items():
+                    test_group_ndcg[group_name] = np.mean(ndcg[group_indices][ndcg[group_indices]>-1])
+
             # conpute the AUC score
             auc_score = 0
             model.eval()
@@ -278,8 +336,24 @@ def train():
 
                 auc_score = compute_auc(train_graph, pos_score, neg_score)
 
-            print('In epoch {}, loss: {:.3f}, auc: {:.3f}, valid hit rate: {:.3f}, test hit rate: {:.3f}, valid MRR: {:.3f}, test MRR: {:.3f}'.format(
-                epoch, train_avg_loss, auc_score, valid_mean_hit_rate, test_mean_hit_rate, valid_mrr, test_mrr))
+            print('In epoch {}, \
+                loss: {:.3f}, \
+                auc: {:.3f}, \
+                valid hit rate: {:.3f}, \
+                test hit rate: {:.3f}, \
+                valid MRR: {:.3f}, \
+                test MRR: {:.3f}, \
+                valid nDCG: {:.3f}, \
+                test nDCG: {:.3f}'.format(
+                epoch, 
+                train_avg_loss, 
+                auc_score, 
+                valid_mean_hit_rate, 
+                test_mean_hit_rate, 
+                valid_mrr, 
+                test_mrr,
+                valid_ndcg,
+                test_ndcg))
             # print('Valid - Group 0 to 5: {:.3f}, Group 5 to 10: {:.3f}, Group 10 to 15: {:.3f}, Group 15 to 20: {:.3f}'.format(
             #     valid_group_0_5_hit_rate, valid_group_5_10_hit_rate, valid_group_10_15_hit_rate, valid_group_15_over_hit_rate
             # ))

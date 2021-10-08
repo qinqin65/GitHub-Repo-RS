@@ -116,6 +116,11 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
     group_mrr = {}
     mrr_groups = Group()
 
+    # nDCG
+    ndcg = np.zeros(users_count)
+    group_ndcg = {}
+    ndcg_groups = Group()
+
     for i, rating in enumerate(user_repo_ratings):
         recommendation = rating.argsort()[::-1][:top_k]
         index_argsorted = test_data[i].argsort()[::-1]
@@ -136,21 +141,39 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
                 mrr[i] = 1 / (recommendation_index[0] + 1)
         elif number_of_ground_truth == 0:
             mrr[i] == -1
+        
+        # nDCG
+        if number_of_ground_truth == 0:
+            ndcg[i] = -1
+        else:
+            relevance_score = test_data[i][recommendation][:min(number_of_ground_truth, top_k)]
+            relevance_score_idea = test_data[i][ground_truth][:min(number_of_ground_truth, top_k)]
+            pow_rel = np.power(2, relevance_score) - 1
+            pow_rel_idea = np.power(2, relevance_score_idea) - 1
+            ranks = np.arange(start=1, stop=len(relevance_score) + 1)
+            log_rank = np.log2(ranks + 1)
+            dcg = np.sum(pow_rel / log_rank)
+            idcg = np.sum(pow_rel_idea / log_rank)
+            ndcg[i] = dcg / idcg
     
         # grouping
         repos_count = len(test_data[i][test_data[i]>0])
         if repos_count < 5:
             hit_rate_groups['0-5'].append(i)
             mrr_groups['0-5'].append(i)
+            ndcg_groups['0-5'].append(i)
         elif repos_count < 10:
             hit_rate_groups['5-10'].append(i)
             mrr_groups['5-10'].append(i)
+            ndcg_groups['5-10'].append(i)
         elif repos_count < 15:
             hit_rate_groups['10-15'].append(i)
             mrr_groups['10-15'].append(i)
+            ndcg_groups['10-15'].append(i)
         else:
             hit_rate_groups['15-over'].append(i)
             mrr_groups['15-over'].append(i)
+            ndcg_groups['15-over'].append(i)
 
     # hit rate mean
     mean_hit_rate = np.mean(hit_rates[hit_rates>-1])
@@ -162,11 +185,18 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
     for group_name, group_indices in mrr_groups.items():
         group_mrr[group_name] = np.mean(mrr[group_indices][mrr[group_indices]>-1])
 
+    # nDCG mean
+    mean_ndcg = np.mean(ndcg[ndcg>-1])
+    for group_name, group_indices in ndcg_groups.items():
+        group_ndcg[group_name] = np.mean(ndcg[group_indices][ndcg[group_indices]>-1])
+
     return (
         mean_hit_rate,
         mean_mrr,
+        mean_ndcg,
         group_hit_rate,
-        group_mrr
+        group_mrr,
+        group_ndcg
     )
 
 def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
@@ -193,21 +223,24 @@ def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
     user_repo_ratings = get_user_repo_ratings(rating_matrix, read_me_tfidf, source_code_tfidf)
     top_k = [10, 15, 20]
     training_results = []
-    result_title_str = 'top %s, hit rate: %.3f, MRR: %.3f'
+    result_title_str = 'top %s, hit rate: %.3f, MRR: %.3f, nDCG: %.3f'
     group_title_str = ''
 
     for k in top_k:
         (
             mean_hit_rate,
             mean_mrr,
+            mean_ndcg,
             group_hit_rate,
-            group_mrr
+            group_mrr,
+            group_ndcg
         ) = top_k_evaluate(k, rating_matrix, user_repo_ratings, test_data)
 
         result = [
             k,
             mean_hit_rate,
-            mean_mrr
+            mean_mrr,
+            mean_ndcg
         ]
 
         for name, value in group_hit_rate.items():
@@ -219,6 +252,11 @@ def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
             result.append(value)
             if k == top_k[0]:
                 group_title_str += ', MRR group ' + name + ': %.3f'
+        
+        for name, value in group_ndcg.items():
+            result.append(value)
+            if k == top_k[0]:
+                group_title_str += ', nDCG group ' + name + ': %.3f'
 
         training_results.append(result)
 
