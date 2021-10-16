@@ -95,17 +95,16 @@ def construct_knowledge_graph():
         pd.DataFrame(np.zeros((users_count, repos_count), np.int8)),
         pd.DataFrame(np.zeros((users_count, repos_count), np.int8))
     )
+    # train a doc2vec model
+    model = convert_to_vec(all_users, all_repos)
+    vector_size = model.vector_size
     # set the device for torch
     device = torch.device('cpu')
     # graph data
     graph_data = {
-        'user': torch.zeros([users_count, 150], dtype=torch.float32, device=device), # 3 vectors with size 50
-        'repo': torch.zeros([repos_count, 361], dtype=torch.float32, device=device) # 7 vectors with size 50 + 6 number property + 5 boolean property
+        'user': torch.zeros([users_count, 3 * vector_size], dtype=torch.float32, device=device), # 3 vectors with size 50
+        'repo': torch.zeros([repos_count, 7 * vector_size + 6 + 5], dtype=torch.float32, device=device) # 7 vectors with size 50 + 6 number property + 5 boolean property
     }
-
-    # train a doc2vec model
-    model = convert_to_vec(all_users, all_repos)
-    vector_size = model.vector_size
 
     for user in all_users:
         if user['_id'] not in users_id_map:
