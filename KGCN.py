@@ -67,7 +67,7 @@ def concact(self_vectors, neighbour_vectors, dim=1):
 def aggregate_sum(self_vectors, neighbour_vectors, dim=0):
     return torch.sum(torch.stack((self_vectors, neighbour_vectors)), dim)
 
-def loss_fn(pos_score, neg_score, neg_sample_size):
+def loss_fn(pos_score, neg_score):
     delta = 0.25
     all_scores = torch.empty(0)
 
