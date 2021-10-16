@@ -65,7 +65,6 @@ def compute_auc(graph, pos_score, neg_score):
 def train():
     EPOCH = 100
     TOP_K = 10
-    NEG_SAMPLE_SIZE = 5
     USER_INPUT_SIZE = 150
     REPO_INPUT_SIZE = 361
     USER_REPO_OUTPUT_SIZE = 125
@@ -97,7 +96,7 @@ def train():
         repo_feat = train_graph.ndata['graph_data']['repo']
         model.train()
         pos_score, neg_score = model(train_graph, train_pos_g, train_neg_g, user_feat, repo_feat)
-        loss = loss_fn(pos_score, neg_score, NEG_SAMPLE_SIZE)
+        loss = loss_fn(pos_score, neg_score)
 
         total_loss += loss.item()
         training_loops += 1
