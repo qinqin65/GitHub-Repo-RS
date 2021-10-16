@@ -83,7 +83,7 @@ def train():
     test_neg_g = g[8]
     
     model = Model(train_graph, USER_INPUT_SIZE, REPO_INPUT_SIZE, USER_REPO_OUTPUT_SIZE, HIDDEN_OUTPUT_SIZE, OUT_SIZE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
 
     ground_truth_valid_data, repos_per_user_valid = process_graph(valid_graph)
     ground_truth_test_data, repos_per_user_test = process_graph(test_graph)
@@ -91,6 +91,9 @@ def train():
     for epoch in range(EPOCH):
         training_loops = 0
         total_loss = 0
+        total_valid_loss = 0
+        valid_loss = 0
+        valid_avg_loss = 0
 
         user_feat = train_graph.ndata['graph_data']['user']
         repo_feat = train_graph.ndata['graph_data']['repo']
@@ -107,6 +110,13 @@ def train():
         optimizer.step()
 
         train_avg_loss = total_loss / training_loops
+
+        model.eval()
+        with torch.no_grad():
+            pos_score, neg_score = model(valid_graph, valid_pos_g, valid_neg_g, user_feat, repo_feat)
+            valid_loss = loss_fn(pos_score, neg_score)
+            total_valid_loss += valid_loss.item()
+            valid_avg_loss = total_valid_loss / training_loops
 
         if epoch % 5 == 0:
             # valid top k recommendation
@@ -337,22 +347,31 @@ def train():
 
             print('In epoch {}, \
                 loss: {:.3f}, \
-                auc: {:.3f}, \
-                valid hit rate: {:.3f}, \
-                test hit rate: {:.3f}, \
-                valid MRR: {:.3f}, \
-                test MRR: {:.3f}, \
-                valid nDCG: {:.3f}, \
-                test nDCG: {:.3f}'.format(
+                valid loss: {:.3f}, \
+                auc: {:.3f}'.format(
                 epoch, 
                 train_avg_loss, 
-                auc_score, 
-                valid_mean_hit_rate, 
-                test_mean_hit_rate, 
-                valid_mrr, 
-                test_mrr,
-                valid_ndcg,
-                test_ndcg))
+                valid_avg_loss,
+                auc_score))
+
+            # print('In epoch {}, \
+            #     loss: {:.3f}, \
+            #     auc: {:.3f}, \
+            #     valid hit rate: {:.3f}, \
+            #     test hit rate: {:.3f}, \
+            #     valid MRR: {:.3f}, \
+            #     test MRR: {:.3f}, \
+            #     valid nDCG: {:.3f}, \
+            #     test nDCG: {:.3f}'.format(
+            #     epoch, 
+            #     train_avg_loss, 
+            #     auc_score, 
+            #     valid_mean_hit_rate, 
+            #     test_mean_hit_rate, 
+            #     valid_mrr, 
+            #     test_mrr,
+            #     valid_ndcg,
+            #     test_ndcg))
             # print('Valid - Group 0 to 5: {:.3f}, Group 5 to 10: {:.3f}, Group 10 to 15: {:.3f}, Group 15 to 20: {:.3f}'.format(
             #     valid_group_0_5_hit_rate, valid_group_5_10_hit_rate, valid_group_10_15_hit_rate, valid_group_15_over_hit_rate
             # ))
