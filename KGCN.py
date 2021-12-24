@@ -30,7 +30,7 @@ class CosineSimilarity(nn.Module):
         return ratings
 
 class Model(nn.Module):
-    def __init__(self, g, in_feat_user, in_feat_repo, out_user_repo, out_hidden, out_feats):
+    def __init__(self, g, in_feat_user, in_feat_repo, out_user_repo, out_hidden, out_feats, drop_out_rate=0.4):
         super(Model, self).__init__()
         self.aggregate = aggregate_sum
         self.user_embedding = Embedding(in_feat_user, out_user_repo)
@@ -42,19 +42,25 @@ class Model(nn.Module):
             { etype[1]: dglnn.GraphConv(out_hidden, out_feats) for etype in g.canonical_etypes },
             aggregate='sum')
         self.predict = CosineSimilarity()
+        self.dropout = nn.Dropout(p=drop_out_rate)
 
     def forward(self, g, pos_g, neg_g, user_feat, repo_feat):
         h_user = self.user_embedding(user_feat)
         h_repo = self.repo_embedding(repo_feat)
         
         h_dict = {
-            'user': h_user,
-            'repo': h_repo
+            'user': self.dropout(h_user),
+            'repo': self.dropout(h_repo)
         }
 
         h = self.hidden(g, h_dict)
+
+        h_dict = {
+            'user': self.dropout(h['user']),
+            'repo': self.dropout(h['repo'])
+        }
         
-        out = self.out(g, h)
+        out = self.out(g, h_dict)
         
         pos_score = self.predict(pos_g, out)
         neg_score = self.predict(neg_g, out)
