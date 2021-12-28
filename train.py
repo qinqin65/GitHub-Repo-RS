@@ -63,14 +63,6 @@ def compute_auc(graph, pos_score, neg_score):
     return np.mean(auc_scores)
 
 def train():
-    EPOCH = 100
-    TOP_K = 10
-    USER_INPUT_SIZE = 150
-    REPO_INPUT_SIZE = 361
-    USER_REPO_OUTPUT_SIZE = 125
-    HIDDEN_OUTPUT_SIZE = 96
-    OUT_SIZE = 50
-
     g, l = dgl.load_graphs('./data/sub_kowledge_graph.bin')
     train_graph = g[0]
     valid_graph = g[1]
@@ -81,22 +73,30 @@ def train():
     valid_neg_g = g[6]
     test_pos_g = g[7]
     test_neg_g = g[8]
+
+    user_feat = train_graph.ndata['graph_data']['user']
+    repo_feat = train_graph.ndata['graph_data']['repo']
     
+    EPOCH = 100
+    TOP_K = 10
+    REPO_INPUT_SIZE = repo_feat.shape[1]
+    USER_INPUT_SIZE = user_feat.shape[1]
+    USER_REPO_OUTPUT_SIZE = 125
+    HIDDEN_OUTPUT_SIZE = 96
+    OUT_SIZE = 50
+
     model = Model(train_graph, USER_INPUT_SIZE, REPO_INPUT_SIZE, USER_REPO_OUTPUT_SIZE, HIDDEN_OUTPUT_SIZE, OUT_SIZE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     ground_truth_valid_data, repos_per_user_valid = process_graph(valid_graph)
     ground_truth_test_data, repos_per_user_test = process_graph(test_graph)
 
-    for epoch in range(EPOCH):
-        training_loops = 0
-        total_loss = 0
-        total_valid_loss = 0
-        valid_loss = 0
-        valid_avg_loss = 0
+    training_loops = 0
+    total_loss = 0
+    total_valid_loss = 0
+    valid_loss = 0
 
-        user_feat = train_graph.ndata['graph_data']['user']
-        repo_feat = train_graph.ndata['graph_data']['repo']
+    for epoch in range(EPOCH):
         model.train()
         pos_score, neg_score = model(train_graph, train_pos_g, train_neg_g, user_feat, repo_feat)
         loss = loss_fn(pos_score, neg_score)
@@ -113,7 +113,9 @@ def train():
 
         model.eval()
         with torch.no_grad():
-            pos_score, neg_score = model(valid_graph, valid_pos_g, valid_neg_g, user_feat, repo_feat)
+            valid_user_feat = valid_graph.ndata['graph_data']['user']
+            valid_repo_feat = valid_graph.ndata['graph_data']['repo']
+            pos_score, neg_score = model(valid_graph, valid_pos_g, valid_neg_g, valid_user_feat, valid_repo_feat)
             valid_loss = loss_fn(pos_score, neg_score)
             total_valid_loss += valid_loss.item()
             valid_avg_loss = total_valid_loss / training_loops
@@ -345,14 +347,22 @@ def train():
 
                 auc_score = compute_auc(train_graph, pos_score, neg_score)
 
-            print('In epoch {}, \
-                loss: {:.3f}, \
-                valid loss: {:.3f}, \
-                auc: {:.3f}'.format(
+            # print('In epoch {}, \
+            #     loss: {:.3f}, \
+            #     valid loss: {:.3f}, \
+            #     auc: {:.3f}'.format(
+            #     epoch, 
+            #     train_avg_loss, 
+            #     valid_avg_loss,
+            #     auc_score))
+
+            print('In epoch {}, loss: {:.3f}, valid loss: {:.3f}, auc: {:.3f}, hit rate: {:.3f}, test hit rate: {:.3f}'.format(
                 epoch, 
                 train_avg_loss, 
                 valid_avg_loss,
-                auc_score))
+                auc_score, 
+                valid_mean_hit_rate, 
+                test_mean_hit_rate))
 
             # print('In epoch {}, \
             #     loss: {:.3f}, \
