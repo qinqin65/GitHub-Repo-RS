@@ -121,6 +121,10 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
     group_ndcg = {}
     ndcg_groups = Group()
 
+    interaction_matrix = pickle.load(open('data/interaction_matrix.p', 'rb'))
+    user_repos = np.sum(interaction_matrix, axis=1)
+    user_1_repo = np.where(user_repos==1)[0]
+
     for i, rating in enumerate(user_repo_ratings):
         recommendation = rating.argsort()[::-1][:top_k]
         index_argsorted = test_data[i].argsort()[::-1]
@@ -162,6 +166,10 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
             hit_rate_groups['0-5'].append(i)
             mrr_groups['0-5'].append(i)
             ndcg_groups['0-5'].append(i)
+            if repos_count == 1 and i in user_1_repo:
+                hit_rate_groups['1'].append(i)
+                mrr_groups['1'].append(i)
+                ndcg_groups['1'].append(i)
         elif repos_count < 10:
             hit_rate_groups['5-10'].append(i)
             mrr_groups['5-10'].append(i)
@@ -203,8 +211,7 @@ def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
     test_data = np.zeros(rating_matrix.shape)
 
     for i, interaction in enumerate(rating_matrix):
-        up_index = np.where(interaction > 0)[0]
-        interaction_count = len(up_index)
+        interaction_count = len(interaction)
 
         # sample data for train and test with the ratio of 60:40
         train_number = round(interaction_count * 0.6)
@@ -216,9 +223,9 @@ def evaluate(rating_matrix, read_me_tfidf, source_code_tfidf):
         train_mask = sample_indexes==0
         test_mask = sample_indexes==1
 
-        test_data[i][up_index[test_mask]] = interaction[up_index[test_mask]]
+        test_data[i][test_mask] = interaction[test_mask]
         # set test data to 0
-        interaction[up_index[test_mask]] = 0
+        interaction[test_mask] = 0
     
     user_repo_ratings = get_user_repo_ratings(rating_matrix, read_me_tfidf, source_code_tfidf)
     top_k = [10, 15, 20]
