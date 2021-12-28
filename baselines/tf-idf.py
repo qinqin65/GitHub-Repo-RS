@@ -1,3 +1,6 @@
+import sys
+sys.path.append('.')
+
 import config as cfg
 import numpy as np
 import pickle
@@ -121,7 +124,7 @@ def top_k_evaluate(top_k, rating_matrix, user_repo_ratings, test_data):
     group_ndcg = {}
     ndcg_groups = Group()
 
-    interaction_matrix = pickle.load(open('data/interaction_matrix.p', 'rb'))
+    interaction_matrix = pickle.load(open('./data/interaction_matrix.p', 'rb'))
     user_repos = np.sum(interaction_matrix, axis=1)
     user_1_repo = np.where(user_repos==1)[0]
 
