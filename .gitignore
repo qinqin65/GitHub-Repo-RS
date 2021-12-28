@@ -4,3 +4,4 @@ data/
 *.log
 *.log.*
 *.out
+*.bz2
